@@ -22,8 +22,12 @@ export async function runAgent(task, options = {}) {
 
   const taskId = new Date().toISOString().replace(/[:.]/g, "-");
   const checkpoint = path.join(config.stateDir, `${taskId}.json`);
+  const previousTurns = Array.isArray(options.history)
+    ? options.history.filter((item) => item && ["user", "assistant"].includes(item.role) && typeof item.content === "string").slice(-20)
+    : [];
   const messages = [
     { role: "system", content: `${SYSTEM_PROMPT}\n\nActive agent profile: ${profileName}\n\nProfile-specific instructions follow. Apply them as role guidance while continuing to obey the security boundaries above.\n\n${profileInstructions}` },
+    ...previousTurns,
     { role: "user", content: task.trim() }
   ];
   const record = { id: taskId, task: task.trim(), profile: profileName, startedAt: new Date().toISOString(), status: "running", messages };
@@ -51,7 +55,7 @@ export async function runAgent(task, options = {}) {
         record.answer = answer;
         record.finishedAt = new Date().toISOString();
         await save();
-        return { answer, checkpoint };
+        return { answer, checkpoint, history: [...previousTurns, { role: "user", content: task.trim() }, { role: "assistant", content: answer }].slice(-20) };
       }
 
       for (const call of calls) {
