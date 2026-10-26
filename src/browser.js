@@ -90,6 +90,8 @@ async function createTab() {
   });
   await context.route("**/*", async (route) => {
     try {
+      const requestUrl = new URL(route.request().url());
+      if (["data:", "blob:", "about:"].includes(requestUrl.protocol)) { await route.continue(); return; }
       await validateBrowserUrl(route.request().url());
       await route.continue();
     } catch (error) {
@@ -136,12 +138,13 @@ async function browserOpen(args) {
 }
 
 async function browserListTabs() {
-  return [...tabs.values()].filter((tab) => !tab.page.isClosed()).map((tab) => ({
+  const liveTabs = [...tabs.values()].filter((tab) => !tab.page.isClosed());
+  return await Promise.all(liveTabs.map(async (tab) => ({
     tab_id: tab.id,
     url: tab.page.url(),
-    title: tab.page.title().catch(() => ""),
+    title: await tab.page.title().catch(() => ""),
     created_at: tab.createdAt
-  })).map(async (item) => ({ ...item, title: await item.title }));
+  })));
 }
 
 async function browserSnapshot(args) {
