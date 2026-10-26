@@ -31,7 +31,7 @@ export const toolDefinitions = [
   { type: "function", function: { name: "web_search", description: "Search the public web for current information. Returns result titles, URLs and snippets.", parameters: { type: "object", properties: { query: { type: "string", minLength: 2 } }, required: ["query"], additionalProperties: false } } },
   { type: "function", function: { name: "browse_url", description: "Fetch and extract readable text from a public HTTP(S) page, including documentation pages. Use web_search to discover URLs first.", parameters: { type: "object", properties: { url: { type: "string" } }, required: ["url"], additionalProperties: false } } },
   { type: "function", function: { name: "github_api", description: "Read public GitHub repository metadata, files, commits, issues, pull requests, releases, and search results using the GitHub REST API. A configured GITHUB_TOKEN enables higher limits/private repositories. Use API paths such as /repos/owner/repo, /repos/owner/repo/contents/src, /repos/owner/repo/issues, /repos/owner/repo/pulls, /repos/owner/repo/commits, /repos/owner/repo/releases, /search/repositories?q=... or /search/code?q=... .", parameters: { type: "object", properties: { path: { type: "string" } }, required: ["path"], additionalProperties: false } } },
-  { type: "function", function: { name: "install_package", description: "Install a project dependency in the configured workspace using npm, pnpm, yarn, or bun. Choose dev=true for development-only packages. Do not install global packages.", parameters: { type: "object", properties: { package: { type: "string", minLength: 1 }, manager: { type: "string", enum: ["npm", "pnpm", "yarn", "bun"] }, dev: { type: "boolean" } }, required: ["package", "manager"], additionalProperties: false } } },
+  { type: "function", function: { name: "install_package", description: "Request owner approval in Telegram, then install a project dependency in the configured workspace using npm, pnpm, yarn, or bun. Choose dev=true for development-only packages. Do not install global packages. Direct package-install commands through run_command are blocked.", parameters: { type: "object", properties: { package: { type: "string", minLength: 1 }, manager: { type: "string", enum: ["npm", "pnpm", "yarn", "bun"] }, dev: { type: "boolean" } }, required: ["package", "manager"], additionalProperties: false } } },
   { type: "function", function: { name: "run_command", description: "Run a command in the configured workspace for development, tests, builds, Git inspection, or project setup. Provide the executable and arguments as a single command string; shell operators, pipes, and redirections are not supported. Commands run without agent API credentials and are time/output limited. Inspect project scripts before running them.", parameters: { type: "object", properties: { command: { type: "string", minLength: 1 }, timeout_seconds: { type: "integer", minimum: 1, maximum: 300 } }, required: ["command"], additionalProperties: false } } },
   { type: "function", function: { name: "run_check", description: "Compatibility tool for common project checks and read-only Git inspection.", parameters: { type: "object", properties: { command: { type: "string", enum: ["npm run check", "npm test", "npm run test", "npm run build", "git status --short", "git diff --", "git log -5 --oneline"] } }, required: ["command"], additionalProperties: false } } },
   { type: "function", function: { name: "ask_user", description: "Pause the current task and ask the configured Telegram owner a question with 2–8 custom in-message buttons. Use this when a decision, clarification, preference, or choice from the user is needed before continuing. Button labels should be short and meaningful. The task resumes with the exact selected choice. Never use this to request secrets.", parameters: { type: "object", properties: { prompt: { type: "string", minLength: 1, maxLength: 1200 }, choices: { type: "array", minItems: 2, maxItems: 8, items: { type: "string", minLength: 1, maxLength: 64 } }, timeout_seconds: { type: "integer", minimum: 10, maximum: 300 } }, required: ["prompt", "choices"], additionalProperties: false } } },
@@ -184,18 +184,21 @@ function splitArgs(command) {
   return args;
 }
 
-function validateCommand(args, original) {
+function validateCommand(args, original, allowPackageInstall = false) {
   const executable = path.basename(args[0]).toLowerCase();
   if (!COMMANDS.has(executable) || DENIED_COMMANDS.has(executable)) throw new Error(`Command '${executable}' is not on the supported executable list.`);
   if (DENIED_PATTERNS.some((pattern) => pattern.test(original))) throw new Error("This potentially destructive or unsafe command is blocked.");
+  if (!allowPackageInstall && /\\b(npm\\s+(?:install|i)|pnpm\\s+(?:add|install|i)|yarn\\s+(?:add|install)|bun\\s+(?:add|install))\\b/i.test(original)) {
+    throw new Error("Package installation must use the install_package tool, which requests owner approval in Telegram.");
+  }
   if (args.some((arg) => arg === "--force-with-lease" || arg === "--no-verify")) throw new Error("This command includes a blocked bypass/force option.");
   return executable;
 }
 
-async function runCommand(command, timeoutSeconds = 120) {
+async function runCommand(command, timeoutSeconds = 120, allowPackageInstall = false) {
   if (typeof command !== "string" || command.length > 2000) throw new Error("Command must be a string under 2000 characters.");
   const args = splitArgs(command);
-  const executable = validateCommand(args, command);
+  const executable = validateCommand(args, command, allowPackageInstall);
   await fs.mkdir(config.workspace, { recursive: true });
   const timeoutMs = Math.min(300, Math.max(1, Number(timeoutSeconds) || 120)) * 1000;
   return await new Promise((resolve, reject) => {
@@ -240,7 +243,7 @@ async function installPackage(args) {
     : manager === "pnpm" ? ["add", ...(args.dev ? ["--save-dev"] : []), pkg]
     : manager === "yarn" ? ["add", ...(args.dev ? ["--dev"] : []), pkg]
     : ["add", ...(args.dev ? ["--dev"] : []), pkg];
-  return await runCommand([manager, ...managerArgs].join(" "), 180);
+  return await runCommand([manager, ...managerArgs].join(" "), 180, true);
 }
 
 async function runCheck(args) {
