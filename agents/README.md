@@ -1,12 +1,12 @@
 # Agent profiles
 
-Each Markdown file in this directory defines the role and working instructions for one agent profile. The filename (without `.md`) is the profile name.
+Each `.md` file in this directory is a role profile. The filename (without `.md`) is its name. Profiles provide role guidance; tools are provided by the agent runtime.
 
-Included profiles:
-- `general.md` — general-purpose tasks (default)
-- `coder.md` — software engineering
-- `researcher.md` — web research and evidence synthesis
+Available tools currently include:
+- Workspace file listing, reading, and writing.
+- Public web search and readable-page fetching.
+- GitHub REST API access (public endpoints; private repositories if `GITHUB_TOKEN` is configured).
+- Project-local dependency installation with npm, pnpm, yarn, or bun.
+- Controlled command execution for project setup, tests, builds, and Git operations.
 
-Add your own profile by creating a file such as `designer.md` with a short heading and clear instructions. Then restart or keep running the controller (profiles are loaded for each new task) and select it in Telegram with `/agent designer`. Use `/agents` to list available profiles.
-
-Treat profile files as trusted instructions: anyone who can edit them can change how the agent behaves. Do not put API keys, passwords, or other secrets in profile files.
+Create a profile such as `designer.md`, then use `/agent designer` in Telegram. Keep secrets out of profiles. Treat profile instructions as trusted because they influence agent behavior.
