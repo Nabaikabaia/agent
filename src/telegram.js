@@ -240,11 +240,11 @@ async function sendRich(chatId, text, buttons = [], options = {}) {
   try {
     return await telegram("sendRichMessage", payload);
   } catch (error) {
-    const unsupported = error?.telegramStatus === 404 ||
+    const canFallback = Boolean(error?.telegramStatus) ||
       /method not found|unknown method|unsupported method|not found/i.test(error?.telegramDescription || error?.message || "");
-    if (!unsupported) throw error;
+    if (!canFallback) throw error;
 
-    // Older Bot API servers can still show the same callback buttons using sendMessage.
+    // If this Bot API server rejects Rich Messages for any reason, retry as a standard message.
     const ephemeral = options.ephemeralMessageParameters;
     const fallbackChatId = ephemeral?.receiver_user_id ?? chatId;
     const fallbackPayload = {
