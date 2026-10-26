@@ -4,7 +4,7 @@ Node.js autonomous agent powered by Oxion AI. It accepts natural-language tasks 
 
 ## Capabilities
 
-- Natural-chat Telegram control and Markdown profiles in `agents/*.md`.
+- Natural-chat Telegram control with native Rich Messages, styled in-message buttons, callback handling, and private ephemeral replies to button taps in groups; Markdown profiles in `agents/*.md`.
 - Workspace file listing, reading, and writing.
 - Public web search and readable-page fetching.
 - Real Playwright Chromium browser: JavaScript-rendered pages, multiple isolated tabs, DOM snapshots, clicks, form filling, keyboard input, selects, scrolling, condition-based waits, workspace file uploads, page-context JavaScript, screenshots, and downloads.
@@ -34,7 +34,7 @@ npm run check
 npm run telegram
 ```
 
-Send `/start` to the bot, then chat normally. Example tasks:
+Send `/start` to the bot, then chat normally. Telegram replies use Rich Messages with native buttons for Status, Help, and Profiles. In groups, `/start` or `/help` posts a small menu; tapping its buttons returns an ephemeral response visible only to the person who tapped it. Task execution and profile switching remain restricted to the configured owner's private chat. These features require a Telegram Bot API server/client version that supports Rich Messages and ephemeral messages. Example tasks:
 
 - Inspect this project, install its dependencies, run its tests, and fix errors.
 - Research a library, read its documentation, inspect its GitHub repository, and assess whether it fits my project.
