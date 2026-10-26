@@ -1,3 +1,5 @@
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { config, validateConfig } from "./config.js";
 import { runAgent } from "./agent.js";
 
@@ -146,7 +148,7 @@ export async function startTelegramController() {
   console.log("Telegram controller stopped.");
 }
 
-if (process.argv[1] && new URL(import.meta.url).pathname === process.argv[1]) {
+if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {
   startTelegramController().catch((error) => {
     console.error(`Telegram controller error: ${error.message}`);
     process.exitCode = 1;
