@@ -16,7 +16,9 @@ const DENIED_PATTERNS = [
   /(^|\s)rm\s+(-[^\s]*r[^\s]*f|-[^\s]*f[^\s]*r)\b/i,
   /\b(git\s+push|git\s+reset\s+--hard|git\s+clean\s+-[a-z]*f|npm\s+publish)\b/i,
   /\b(curl|wget)\b[^\n|]*\|\s*(sh|bash|zsh)\b/i,
-  /\b(chmod\s+777|chown\s+-R)\b/i
+  /\b(chmod\s+777|chown\s+-R)\b/i,
+  /\b(npm|pnpm|yarn|bun)\s+(install|add)\b[^\n]*\s(--global|-g)\b/i,
+  /\bpip3?\s+install\b/i
 ];
 
 export const toolDefinitions = [
