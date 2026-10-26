@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import { config } from "./config.js";
+import { executeBrowserTool } from "./browser.js";
 
 const MAX_OUTPUT = 30_000;
 const DEFAULT_TIMEOUT_MS = 120_000;
@@ -31,6 +32,22 @@ export const toolDefinitions = [
   { type: "function", function: { name: "install_package", description: "Install a project dependency in the configured workspace using npm, pnpm, yarn, or bun. Choose dev=true for development-only packages. Do not install global packages.", parameters: { type: "object", properties: { package: { type: "string", minLength: 1 }, manager: { type: "string", enum: ["npm", "pnpm", "yarn", "bun"] }, dev: { type: "boolean" } }, required: ["package", "manager"], additionalProperties: false } } },
   { type: "function", function: { name: "run_command", description: "Run a command in the configured workspace for development, tests, builds, Git inspection, or project setup. Provide the executable and arguments as a single command string; shell operators, pipes, and redirections are not supported. Commands run without agent API credentials and are time/output limited. Inspect project scripts before running them.", parameters: { type: "object", properties: { command: { type: "string", minLength: 1 }, timeout_seconds: { type: "integer", minimum: 1, maximum: 300 } }, required: ["command"], additionalProperties: false } } },
   { type: "function", function: { name: "run_check", description: "Compatibility tool for common project checks and read-only Git inspection.", parameters: { type: "object", properties: { command: { type: "string", enum: ["npm run check", "npm test", "npm run test", "npm run build", "git status --short", "git diff --", "git log -5 --oneline"] } }, required: ["command"], additionalProperties: false } } }
+
+  { type: "function", function: { name: "browser_open", description: "Open a URL in a real headless Chromium browser using Playwright. JavaScript-rendered sites are supported. Creates a new isolated tab unless tab_id is provided. HTTP(S) only; local/private network targets are blocked by default.", parameters: { type: "object", properties: { url: { type: "string" }, tab_id: { type: "string" }, wait_until: { type: "string", enum: ["load", "domcontentloaded", "networkidle", "commit"] }, timeout_ms: { type: "integer", minimum: 1000, maximum: 60000 } }, required: ["url"], additionalProperties: false } } },
+  { type: "function", function: { name: "browser_list_tabs", description: "List open Playwright browser tabs, titles, and URLs.", parameters: { type: "object", properties: {}, additionalProperties: false } } },
+  { type: "function", function: { name: "browser_snapshot", description: "Inspect the current page DOM and visible text, links, buttons, inputs, and images. Use this before interacting with unfamiliar pages.", parameters: { type: "object", properties: { tab_id: { type: "string" } }, required: ["tab_id"], additionalProperties: false } } },
+  { type: "function", function: { name: "browser_click", description: "Click a page element by CSS selector, role+name, accessible label, placeholder, or text. Use browser_snapshot first to identify the right target.", parameters: { type: "object", properties: { tab_id: { type: "string" }, selector: { type: "string" }, role: { type: "string" }, name: { type: "string" }, label: { type: "string" }, placeholder: { type: "string" }, text: { type: "string" }, exact: { type: "boolean" }, force: { type: "boolean" }, timeout_ms: { type: "integer" }, wait_ms: { type: "integer" } }, required: ["tab_id"], additionalProperties: false } } },
+  { type: "function", function: { name: "browser_fill", description: "Fill a form field by selector, accessible label, placeholder, role+name, or text. Do not send secrets to untrusted sites without authorization.", parameters: { type: "object", properties: { tab_id: { type: "string" }, selector: { type: "string" }, role: { type: "string" }, name: { type: "string" }, label: { type: "string" }, placeholder: { type: "string" }, text: { type: "string" }, exact: { type: "boolean" }, value: { type: "string" }, timeout_ms: { type: "integer" } }, required: ["tab_id", "value"], additionalProperties: false } } },
+  { type: "function", function: { name: "browser_type", description: "Type text character-by-character into a located element, useful for pages that react to keyboard events.", parameters: { type: "object", properties: { tab_id: { type: "string" }, selector: { type: "string" }, role: { type: "string" }, name: { type: "string" }, label: { type: "string" }, placeholder: { type: "string" }, text: { type: "string" }, exact: { type: "boolean" }, delay_ms: { type: "integer" }, timeout_ms: { type: "integer" } }, required: ["tab_id", "text"], additionalProperties: false } } },
+  { type: "function", function: { name: "browser_press", description: "Press a keyboard key on a located element or the active page (e.g. Enter, Tab, Escape, Control+A).", parameters: { type: "object", properties: { tab_id: { type: "string" }, selector: { type: "string" }, role: { type: "string" }, name: { type: "string" }, label: { type: "string" }, placeholder: { type: "string" }, text: { type: "string" }, exact: { type: "boolean" }, key: { type: "string" }, timeout_ms: { type: "integer" } }, required: ["tab_id", "key"], additionalProperties: false } } },
+  { type: "function", function: { name: "browser_select", description: "Select option(s) in a native select field by CSS selector or accessible locator.", parameters: { type: "object", properties: { tab_id: { type: "string" }, selector: { type: "string" }, role: { type: "string" }, name: { type: "string" }, label: { type: "string" }, placeholder: { type: "string" }, text: { type: "string" }, exact: { type: "boolean" }, values: { oneOf: [{ type: "string" }, { type: "array", items: { type: "string" } }], description: "Option value(s) to select." }, timeout_ms: { type: "integer" } }, required: ["tab_id", "values"], additionalProperties: false } } },
+  { type: "function", function: { name: "browser_scroll", description: "Scroll the page by x/y pixels or scroll a selected element into view.", parameters: { type: "object", properties: { tab_id: { type: "string" }, selector: { type: "string" }, x: { type: "integer" }, y: { type: "integer" } }, required: ["tab_id"], additionalProperties: false } } },
+  { type: "function", function: { name: "browser_screenshot", description: "Capture a screenshot of the current page and save it under workspace/browser-screenshots. Use this to preserve visual evidence.", parameters: { type: "object", properties: { tab_id: { type: "string" }, full_page: { type: "boolean" } }, required: ["tab_id"], additionalProperties: false } } },
+  { type: "function", function: { name: "browser_evaluate", description: "Run JavaScript in the current webpage context for DOM inspection or ordinary page interaction. This does not run in Node.js and cannot directly access the agent filesystem or environment. Never use it to defeat access controls or anti-abuse systems.", parameters: { type: "object", properties: { tab_id: { type: "string" }, script: { type: "string" } }, required: ["tab_id", "script"], additionalProperties: false } } },
+  { type: "function", function: { name: "browser_back", description: "Navigate the current tab back one history entry.", parameters: { type: "object", properties: { tab_id: { type: "string" } }, required: ["tab_id"], additionalProperties: false } } },
+  { type: "function", function: { name: "browser_close", description: "Close a browser tab and its isolated browser context.", parameters: { type: "object", properties: { tab_id: { type: "string" } }, required: ["tab_id"], additionalProperties: false } } },
+  { type: "function", function: { name: "browser_downloads", description: "List recent browser download events. Downloads are saved under workspace/browser-downloads.", parameters: { type: "object", properties: {}, additionalProperties: false } } },
+
 ];
 
 function safePath(relativePath = ".") {
@@ -228,6 +245,21 @@ export async function executeTool(name, args) {
     case "install_package": return await installPackage(args);
     case "run_command": return await runCommand(args.command, args.timeout_seconds);
     case "run_check": return await runCheck(args);
+    case "browser_open":
+    case "browser_list_tabs":
+    case "browser_snapshot":
+    case "browser_click":
+    case "browser_fill":
+    case "browser_type":
+    case "browser_press":
+    case "browser_select":
+    case "browser_scroll":
+    case "browser_screenshot":
+    case "browser_evaluate":
+    case "browser_back":
+    case "browser_close":
+    case "browser_downloads":
+      return await executeBrowserTool(name, args);
     default: throw new Error(`Unknown tool: ${name}`);
   }
 }
