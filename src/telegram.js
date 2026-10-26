@@ -8,6 +8,7 @@ const API = () => `https://api.telegram.org/bot${config.telegramBotToken}`;
 const MAX_MESSAGE_LENGTH = 3900;
 let activeTask = null;
 let selectedProfile = "general";
+let conversationHistory = [];
 let stopping = false;
 
 async function telegram(method, payload = {}) {
@@ -114,7 +115,8 @@ async function handleMessage(message) {
   activeTask = { task, profile: selectedProfile, startedAt: new Date().toISOString() };
   await sendText(chatId, `Task received.\nProfile: ${selectedProfile}\nWorking on it now.\n\n${task.slice(0, 700)}`, message.message_id);
   try {
-    const result = await runAgent(task, { profile: activeTask.profile });
+    const result = await runAgent(task, { profile: activeTask.profile, history: conversationHistory });
+    if (Array.isArray(result.history)) conversationHistory = result.history;
     await sendText(chatId, `Task finished.\n\n${result.answer}\n\nCheckpoint: ${result.checkpoint}`);
   } catch (error) {
     await sendText(chatId, `Task failed: ${error.message || "Unknown error"}`);
