@@ -123,9 +123,14 @@ async function runCheck(args) {
   const selected = commands[args.command];
   if (!selected) throw new Error("Command is not allowed.");
   return await new Promise((resolve, reject) => {
+    // Do not pass the agent's API key or the rest of its environment into project scripts.
+    const childEnv = { PATH: process.env.PATH || "", CI: "1" };
+    for (const key of ["HOME", "TMPDIR", "TEMP", "TMP", "SYSTEMROOT", "WINDIR"]) {
+      if (process.env[key]) childEnv[key] = process.env[key];
+    }
     const child = spawn(selected[0], selected[1], {
       cwd: config.workspace,
-      env: { ...process.env, CI: "1" },
+      env: childEnv,
       shell: false,
       stdio: ["ignore", "pipe", "pipe"]
     });
