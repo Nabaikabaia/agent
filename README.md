@@ -56,7 +56,7 @@ Open the bot and send `/start`. After that, **just chat normally**. For example,
 Look through my workspace and explain how the project works.
 ```
 
-The controller treats normal text as a task. Commands are optional:
+The controller treats normal text as a task, and keeps the last 10 user/agent exchanges as conversational context for follow-up messages. This chat context currently lives in memory and resets when the controller restarts. Commands are optional:
 
 - `/agents` — list Markdown profiles.
 - `/agent coder` — use the coding profile for the next messages.
@@ -67,7 +67,7 @@ The controller treats normal text as a task. Commands are optional:
 - `/help` — show help.
 - `/task <task>` — explicitly submit a task if you prefer.
 
-Only one task runs at a time. The selected profile currently resets to `general` when the Telegram controller restarts. Keep the controller process running in your Box or configure the Box to start `npm run telegram` automatically. Do not run multiple controller instances with the same bot token. If the bot has a webhook configured, remove it before using this long-polling controller.
+Only one task runs at a time. The selected profile and recent chat context currently reset when the Telegram controller restarts. Keep the controller process running in your Box or configure the Box to start `npm run telegram` automatically. Do not run multiple controller instances with the same bot token. If the bot has a webhook configured, remove it before using this long-polling controller.
 
 ## Create your own agent profile
 
