@@ -304,7 +304,7 @@ async function profilesText() {
 
 ${profiles.map((profile) => `- **${profile.name}** — ${profile.description}`).join("\n")}
 
-Use `/agent <name>` in the owner's private chat to switch profiles.`;
+Use /agent <name> in the owner's private chat to switch profiles.`;
 }
 
 function statusText(groupView = false) {
