@@ -4,12 +4,14 @@ A structured Node.js autonomous agent powered by Oxion AI's OpenAI-compatible AP
 
 ## Current capabilities
 
+- Natural-chat Telegram control: send a normal message; no task prefix is required.
+- Optional commands for status, help, and switching between Markdown agent profiles.
+- Separate agent profiles in `agents/*.md`, each with its own role and skill instructions.
 - Native model tool-calling loop.
 - Read, create, and edit files inside a configured workspace.
 - Search the public web using DuckDuckGo HTML results.
 - Run a limited set of project checks and read-only Git commands.
 - Save task checkpoints locally.
-- Telegram long-polling controller for sending tasks and checking status.
 - Telegram control is restricted to one configured numeric owner ID.
 - No third-party Node dependencies.
 
@@ -34,30 +36,58 @@ TELEGRAM_OWNER_ID=your_numeric_telegram_user_id
 
 Keep `.env` private; never paste the tokens into chat or commit them.
 
-### Run from the terminal
+## Run
+
+Check syntax:
 
 ```sh
 npm run check
-npm start -- "Inspect the workspace and explain what is there"
 ```
 
-### Run through Telegram
-
-Start the long-polling controller in the Box terminal:
+Start Telegram polling:
 
 ```sh
 npm run telegram
 ```
 
-Open the new bot in Telegram and send `/start`. Then send a task as a normal message or use:
+Open the bot and send `/start`. After that, **just chat normally**. For example, send:
 
 ```text
-/task Inspect the workspace and summarize its files
-/status
-/help
+Look through my workspace and explain how the project works.
 ```
 
-The controller stays running while it polls Telegram. Keep that process alive in your Box session or configure the Box to start `npm run telegram` automatically. Do not run multiple controller instances with the same bot token. The bot uses long polling; if a webhook is configured for that bot, remove it before using this controller.
+The controller treats normal text as a task. Commands are optional:
+
+- `/agents` — list Markdown profiles.
+- `/agent coder` — use the coding profile for the next messages.
+- `/agent researcher` — use the research profile.
+- `/agent general` — return to the general profile.
+- `/agent` — show the selected profile.
+- `/status` — check the current task.
+- `/help` — show help.
+- `/task <task>` — explicitly submit a task if you prefer.
+
+Only one task runs at a time. The selected profile currently resets to `general` when the Telegram controller restarts. Keep the controller process running in your Box or configure the Box to start `npm run telegram` automatically. Do not run multiple controller instances with the same bot token. If the bot has a webhook configured, remove it before using this long-polling controller.
+
+## Create your own agent profile
+
+Add a Markdown file to the `agents/` directory. The filename (without `.md`) becomes the profile name. For example, create `agents/designer.md`:
+
+```md
+# Design Agent
+
+You are a product and UI design specialist. Review existing design constraints before proposing changes.
+Prefer polished, accessible, responsive interfaces and clear implementation steps.
+```
+
+Then send `/agents` in Telegram and select it with `/agent designer`. The profile is read for each task, so edits to an existing profile apply to the next task without rebuilding the code. Profiles are role instructions, not new tools; they can only use capabilities currently exposed to the agent.
+
+Included profiles:
+- `agents/general.md` — general-purpose assistant (default)
+- `agents/coder.md` — software engineering
+- `agents/researcher.md` — research and evidence synthesis
+
+Treat profile files as trusted instructions: anyone who can edit them can change agent behavior. Do not put API keys, passwords, or other secrets in profile files.
 
 ## Security boundaries
 
@@ -68,10 +98,6 @@ The controller stays running while it polls Telegram. Keep that process alive in
 - The agent does not deploy, delete user data, change credentials, make purchases, or perform other high-impact actions automatically.
 - Run in a disposable/containerized environment for untrusted repositories. A workspace path check is not a full operating-system sandbox; project scripts can execute code when run.
 
-## Current scope
-
-Telegram currently supports one task at a time, plain-text task requests, `/task`, `/status`, and `/help`. It does not yet support cancellation, approvals through Telegram, GitHub branch/PR automation, browser automation, remote memory, or image generation. Oxion must be reachable and the configured model must be available for AI tasks to work.
-
 ## Layout
 
 ```text
@@ -80,6 +106,12 @@ src/
   oxion.js     OpenAI-compatible API client
   tools.js     Explicit tool schemas and guarded implementations
   agent.js     Agent loop and local checkpoint
+  profiles.js  Markdown profile loader
   index.js     Terminal entry point
-  telegram.js  Owner-only Telegram command controller
+  telegram.js  Owner-only Telegram chat controller
+agents/
+  general.md
+  coder.md
+  researcher.md
+  README.md
 ```
