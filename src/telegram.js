@@ -3,6 +3,7 @@ import { fileURLToPath } from "node:url";
 import { config, validateConfig } from "./config.js";
 import { runAgent } from "./agent.js";
 import { listProfiles, loadProfile } from "./profiles.js";
+import { registerChoicePromptSender, resolveUserChoice } from "./interaction.js";
 
 const API = () => `https://api.telegram.org/bot${config.telegramBotToken}`;
 const MAX_MESSAGE_LENGTH = 3900;
@@ -12,16 +13,38 @@ let selectedProfile = "general";
 let conversationHistory = [];
 let stopping = false;
 
+function describeError(error) {
+  const parts = [error?.message || String(error)];
+  if (error?.cause?.message && error.cause.message !== error.message) parts.push(`cause: ${error.cause.message}`);
+  if (error?.cause?.code) parts.push(`code: ${error.cause.code}`);
+  return parts.join(" | ");
+}
+
 async function telegram(method, payload = {}) {
-  const response = await fetch(`${API()}/${method}`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(payload),
-    signal: AbortSignal.timeout(method === "getUpdates" ? 35_000 : 15_000)
-  });
-  const data = await response.json();
+  let response;
+  try {
+    response = await fetch(`${API()}/${method}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(method === "getUpdates" ? 35_000 : 15_000)
+    });
+  } catch (error) {
+    throw new Error(`Telegram ${method} network request failed: ${describeError(error)}`, { cause: error });
+  }
+
+  const raw = await response.text();
+  let data;
+  try {
+    data = JSON.parse(raw);
+  } catch {
+    throw new Error(`Telegram ${method} returned non-JSON (HTTP ${response.status}): ${raw.slice(0, 180)}`);
+  }
   if (!response.ok || !data.ok) {
-    throw new Error(data.description || `Telegram API HTTP ${response.status}`);
+    const error = new Error(data.description || `Telegram API HTTP ${response.status}`);
+    error.telegramStatus = response.status;
+    error.telegramDescription = data.description || "";
+    throw error;
   }
   return data.result;
 }
@@ -179,6 +202,32 @@ function menuButtons(includeProfiles = true) {
   return buttons;
 }
 
+function plainFallbackText(text) {
+  return String(text ?? "")
+    .replace(/^#{1,6}\s+/gm, "")
+    .replace(/\*\*([^*]+)\*\*/g, "$1")
+    .replace(/(?<!\*)\*([^*]+)\*(?!\*)/g, "$1")
+    .replace(/`([^`]+)`/g, "$1")
+    .replace(/^`{3}[^\n]*\n?/gm, "")
+    .replace(/^`{3}\s*$/gm, "")
+    .replace(/^\s*(---+|___+|\*\*\*+)\s*$/gm, "────────")
+    .slice(0, MAX_MESSAGE_LENGTH);
+}
+
+function legacyKeyboard(buttons) {
+  if (!buttons.length) return undefined;
+  const rows = [];
+  const regular = buttons.filter((button) => !button.separate).slice(0, 8);
+  if (regular.length) rows.push(regular.map((button) => ({
+    text: button.text.slice(0, 64),
+    callback_data: button.data.slice(0, 64)
+  })));
+  for (const button of buttons.filter((item) => item.separate).slice(0, 20)) {
+    rows.push([{ text: button.text.slice(0, 64), callback_data: button.data.slice(0, 64) }]);
+  }
+  return rows.length ? { inline_keyboard: rows } : undefined;
+}
+
 async function sendRich(chatId, text, buttons = [], options = {}) {
   const payload = {
     chat_id: chatId,
@@ -188,7 +237,23 @@ async function sendRich(chatId, text, buttons = [], options = {}) {
       : {}),
     ...(options.replyParameters ? { reply_parameters: options.replyParameters } : {})
   };
-  return telegram("sendRichMessage", payload);
+  try {
+    return await telegram("sendRichMessage", payload);
+  } catch (error) {
+    const unsupported = error?.telegramStatus === 404 ||
+      /method not found|unknown method|unsupported method|not found/i.test(error?.telegramDescription || error?.message || "");
+    if (!unsupported) throw error;
+
+    // Older Bot API servers can still show the same callback buttons using sendMessage.
+    const ephemeral = options.ephemeralMessageParameters;
+    const fallbackChatId = ephemeral?.receiver_user_id ?? chatId;
+    const fallbackPayload = {
+      chat_id: fallbackChatId,
+      text: plainFallbackText(text),
+      ...(legacyKeyboard(buttons) ? { reply_markup: legacyKeyboard(buttons) } : {})
+    };
+    return await telegram("sendMessage", fallbackPayload);
+  }
 }
 
 async function sendText(chatId, text, replyToMessageId) {
@@ -279,6 +344,31 @@ async function handleCallback(callback) {
 
   const groupView = isGroup(chat);
   const action = data.slice(CALLBACK_PREFIX.length);
+
+  // Dynamic task questions use short, one-time callback IDs and only accept the owner in private chat.
+  if (action.startsWith("q:")) {
+    if (!isOwner(userId) || chat?.type !== "private") {
+      await telegram("answerCallbackQuery", {
+        callback_query_id: callbackId,
+        text: "Only the owner can answer this question.",
+        show_alert: true
+      });
+      return;
+    }
+    const match = action.match(/^q:([a-f0-9]{12}):(\d+)$/);
+    if (!match) {
+      await telegram("answerCallbackQuery", { callback_query_id: callbackId, text: "Invalid or expired choice." });
+      return;
+    }
+    const result = resolveUserChoice(match[1], Number(match[2]));
+    await telegram("answerCallbackQuery", {
+      callback_query_id: callbackId,
+      text: result.ok ? `Selected: ${result.selected}. Continuing.` : result.reason,
+      show_alert: !result.ok
+    });
+    return;
+  }
+
   let response;
   let buttons = menuButtons(!groupView);
 
@@ -441,6 +531,14 @@ export async function startTelegramController() {
   console.log(`Authorized owner ID: ${config.telegramOwnerId}`);
   console.log("Send /start to the bot in Telegram. Press Ctrl+C to stop.");
 
+  registerChoicePromptSender(async ({ id, prompt, choices }) => {
+    const buttons = choices.map((choice, index) => ({
+      text: choice,
+      data: `${CALLBACK_PREFIX}q:${id}:${index}`
+    }));
+    await sendRich(config.telegramOwnerId, prompt, buttons);
+  });
+
   let offset = 0;
   process.on("SIGINT", () => { stopping = true; });
   process.on("SIGTERM", () => { stopping = true; });
@@ -460,14 +558,20 @@ export async function startTelegramController() {
           });
         }
         if (update.message) {
-          void handleMessage(update.message).catch((error) => {
-            console.error("Telegram message handling failed:", error.message);
+          void handleMessage(update.message).catch(async (error) => {
+            console.error("Telegram message handling failed:", describeError(error));
+            if (error?.stack) console.error(error.stack);
+            try {
+              await sendText(config.telegramOwnerId, `Agent error: ${error.message || "Unknown error"}`);
+            } catch (notifyError) {
+              console.error("Could not notify owner about the error:", describeError(notifyError));
+            }
           });
         }
       }
     } catch (error) {
       if (!stopping) {
-        console.error("Telegram polling error:", error.message);
+        console.error("Telegram polling error:", describeError(error));
         await sleep(3000);
       }
     }
