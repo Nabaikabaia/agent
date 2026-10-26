@@ -142,15 +142,30 @@ function markdownBlocks(markdown) {
 function richContent(text, buttons = []) {
   const blocks = markdownBlocks(text);
   if (buttons.length) {
-    blocks.push({
-      type: "buttons",
-      align: "left",
-      buttons: buttons.slice(0, 8).map((button) => ({
-        text: button.text,
-        callback_data: button.data,
-        ...(button.style ? { style: button.style } : {})
-      }))
-    });
+    const regularRow = buttons.filter((button) => !button.separate).slice(0, 8);
+    const separateRows = buttons.filter((button) => button.separate);
+    if (regularRow.length) {
+      blocks.push({
+        type: "buttons",
+        align: "left",
+        buttons: regularRow.map((button) => ({
+          text: button.text,
+          callback_data: button.data,
+          ...(button.style ? { style: button.style } : {})
+        }))
+      });
+    }
+    for (const button of separateRows) {
+      blocks.push({
+        type: "buttons",
+        align: "left",
+        buttons: [{
+          text: button.text,
+          callback_data: button.data,
+          ...(button.style ? { style: button.style } : {})
+        }]
+      });
+    }
   }
   return { blocks };
 }
@@ -279,7 +294,8 @@ async function handleCallback(callback) {
       const profiles = await listProfiles();
       buttons = profiles.slice(0, 5).map((profile) => ({
         text: profile.name,
-        data: `${CALLBACK_PREFIX}profile:${profile.name}`
+        data: `${CALLBACK_PREFIX}profile:${profile.name}`,
+        separate: true
       }));
       buttons.push({ text: "Help", data: `${CALLBACK_PREFIX}help`, style: "link" });
     } else {
