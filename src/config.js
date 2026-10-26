@@ -26,6 +26,7 @@ export const config = {
   model: process.env.OXION_MODEL || "deepseek-v4-flash-0731",
   workspace,
   stateDir: path.resolve(".agent-state"),
+  agentsDir: path.resolve(process.env.AGENT_PROFILES_DIR || "./agents"),
   maxSteps: Math.min(20, Math.max(1, Number.parseInt(process.env.AGENT_MAX_STEPS || "8", 10) || 8))
 };
 
