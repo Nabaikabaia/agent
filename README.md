@@ -7,7 +7,7 @@ Node.js autonomous agent powered by Oxion AI. It accepts natural-language tasks 
 - Natural-chat Telegram control and Markdown profiles in `agents/*.md`.
 - Workspace file listing, reading, and writing.
 - Public web search and readable-page fetching.
-- Real Playwright Chromium browser: JavaScript-rendered pages, multiple isolated tabs, DOM snapshots, clicks, form filling, keyboard input, selects, scrolling, page-context JavaScript, screenshots, and downloads.
+- Real Playwright Chromium browser: JavaScript-rendered pages, multiple isolated tabs, DOM snapshots, clicks, form filling, keyboard input, selects, scrolling, condition-based waits, workspace file uploads, page-context JavaScript, screenshots, and downloads.
 - Browser downloads and screenshots saved under the configured workspace.
 - GitHub REST API access for repositories, contents, commits, issues, pull requests, releases, and search.
 - Project-local package installation with npm, pnpm, yarn, or bun.
