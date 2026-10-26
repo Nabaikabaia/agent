@@ -4,6 +4,7 @@ import { spawn } from "node:child_process";
 import { config } from "./config.js";
 import { executeBrowserTool } from "./browser.js";
 import { requestUserChoice } from "./interaction.js";
+import { requestPackageInstallApproval } from "./approvals.js";
 
 const MAX_OUTPUT = 30_000;
 const DEFAULT_TIMEOUT_MS = 120_000;
@@ -225,6 +226,16 @@ async function installPackage(args) {
   if (!["npm", "pnpm", "yarn", "bun"].includes(manager)) throw new Error("Unsupported package manager.");
   if (!pkg || pkg.length > 250 || /[\n\r;&|<>\0]/.test(pkg) || pkg.startsWith("-")) throw new Error("Invalid package name/specifier.");
   if (/^(npm|pnpm|yarn|bun)@/.test(pkg)) throw new Error("Use the manager field to select a package manager.");
+  const approval = await requestPackageInstallApproval({ packageName: pkg, manager, dev: Boolean(args.dev) });
+  if (!approval.approved) {
+    return {
+      installed: false,
+      approval: approval.status,
+      package: pkg,
+      message: approval.message || "Package installation was not approved."
+    };
+  }
+
   const managerArgs = manager === "npm" ? ["install", ...(args.dev ? ["--save-dev"] : []), "--", pkg]
     : manager === "pnpm" ? ["add", ...(args.dev ? ["--save-dev"] : []), pkg]
     : manager === "yarn" ? ["add", ...(args.dev ? ["--dev"] : []), pkg]
