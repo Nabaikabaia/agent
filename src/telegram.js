@@ -131,11 +131,9 @@ export async function startTelegramController() {
       for (const update of updates) {
         offset = Math.max(offset, update.update_id + 1);
         if (update.message) {
-          try {
-            await handleMessage(update.message);
-          } catch (error) {
+          void handleMessage(update.message).catch((error) => {
             console.error("Telegram message handling failed:", error.message);
-          }
+          });
         }
       }
     } catch (error) {
