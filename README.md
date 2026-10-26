@@ -4,7 +4,7 @@ Node.js autonomous agent powered by Oxion AI. It accepts natural-language tasks 
 
 ## Capabilities
 
-- Natural-chat Telegram control with native Rich Messages, styled in-message buttons, callback handling, and private ephemeral replies to button taps in groups; Markdown profiles in `agents/*.md`.
+- Natural-chat Telegram control with Rich Messages/button callbacks, dynamic choice buttons, owner-only package-install approval prompts, and Markdown profiles in `agents/*.md`.
 - Dynamic in-message choice prompts: the agent can pause a task, ask the owner a question with 2–8 context-specific buttons, and continue using the selected answer. Prompts expire after a timeout.
 - Workspace file listing, reading, and writing.
 - Public web search and readable-page fetching.
@@ -41,7 +41,7 @@ Send `/start` to the bot, then chat normally. Telegram replies use Rich Messages
 - Research a library, read its documentation, inspect its GitHub repository, and assess whether it fits my project.
 - Clone my public repository into the workspace and explain its structure.
 
-The Telegram controller keeps up to 10 exchanges in memory; context resets when it restarts. Only one task runs at a time.
+The Telegram controller keeps up to 10 exchanges in memory; context resets when it restarts. Only one task runs at a time. Package installation requests pause until the configured owner taps **Approve** or **Reject**. Approval records are stored in `.agent-state/package-approvals.json`; expired, stale, or interrupted requests never install a package. If the process restarts, an in-flight task cannot resume automatically, so its pending request is marked interrupted and must be requested again.
 
 ## Commands
 
@@ -54,7 +54,7 @@ The Telegram controller keeps up to 10 exchanges in memory; context resets when 
 
 ## Tool boundaries
 
-- Package installation is project-local; global installs are unsupported.
+- Package installation is project-local; global installs are unsupported. Each package installation request requires explicit owner approval in Telegram. Rejecting, timing out, or restarting while awaiting a decision does not install the package.
 - Commands run without a shell, have a supported executable list, timeouts, and output limits. Pipes and redirections are unsupported.
 - Playwright renders JavaScript-heavy pages and can interact with ordinary page controls. Screenshots are saved to disk; image-based reasoning depends on the configured Oxion model supporting vision, which is not assumed by this code.
 - Browser HTTP(S) requests to private/local network targets and metadata hosts are blocked by default. Do not enable local access except in a trusted development workflow.
