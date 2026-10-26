@@ -20,6 +20,8 @@ const workspace = path.resolve(process.env.AGENT_WORKSPACE || "./workspace");
 
 export const config = {
   apiKey: process.env.OXION_API_KEY || "",
+  telegramBotToken: process.env.TELEGRAM_BOT_TOKEN || "",
+  telegramOwnerId: process.env.TELEGRAM_OWNER_ID || "",
   baseUrl: (process.env.OXION_BASE_URL || "https://www.oxionai.com/v1").replace(/\/+$/, ""),
   model: process.env.OXION_MODEL || "deepseek-v4-flash-0731",
   workspace,
