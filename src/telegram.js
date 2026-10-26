@@ -289,11 +289,11 @@ function helpText() {
 
 Active profile: **${selectedProfile}**
 
-- `/agent <name>` — switch agent profile
-- `/agents` — list profiles
-- `/task <task>` — explicitly submit a task
-- `/status` — check progress
-- `/help` — show commands
+- /agent <name> — switch agent profile
+- /agents — list profiles
+- /task <task> — explicitly submit a task
+- /status — check progress
+- /help — show commands
 
 Only the configured owner can run tasks. In groups, buttons return private ephemeral responses when Telegram supports them.`;
 }
