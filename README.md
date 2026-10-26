@@ -7,6 +7,8 @@ Node.js autonomous agent powered by Oxion AI. It accepts natural-language tasks 
 - Natural-chat Telegram control and Markdown profiles in `agents/*.md`.
 - Workspace file listing, reading, and writing.
 - Public web search and readable-page fetching.
+- Real Playwright Chromium browser: JavaScript-rendered pages, multiple isolated tabs, DOM snapshots, clicks, form filling, keyboard input, selects, scrolling, page-context JavaScript, screenshots, and downloads.
+- Browser downloads and screenshots saved under the configured workspace.
 - GitHub REST API access for repositories, contents, commits, issues, pull requests, releases, and search.
 - Project-local package installation with npm, pnpm, yarn, or bun.
 - Controlled one-command-at-a-time execution for development, tests, builds, and Git inspection.
@@ -18,9 +20,10 @@ Requires Node.js 20+ and a running Box/workspace.
 
 1. Copy `.env.example` to `.env`.
 2. Set `OXION_API_KEY` and verify `OXION_MODEL` in your Oxion dashboard.
-3. Create a bot with Telegram **@BotFather** and find your numeric Telegram user ID.
-4. Set `TELEGRAM_BOT_TOKEN` and `TELEGRAM_OWNER_ID`.
-5. Optional: set `GITHUB_TOKEN` to a least-privilege token for private repositories and higher API limits. Public GitHub API access works without it.
+3. Install dependencies and Chromium: `npm install` then `npm run browser:install`.
+4. Create a bot with Telegram **@BotFather** and find your numeric Telegram user ID.
+5. Set `TELEGRAM_BOT_TOKEN` and `TELEGRAM_OWNER_ID`.
+6. Optional: set `GITHUB_TOKEN` to a least-privilege token for private repositories and higher API limits. Public GitHub API access works without it.
 
 Never paste credentials into chat or commit `.env`.
 
@@ -52,10 +55,11 @@ The Telegram controller keeps up to 10 exchanges in memory; context resets when 
 
 - Package installation is project-local; global installs are unsupported.
 - Commands run without a shell, have a supported executable list, timeouts, and output limits. Pipes and redirections are unsupported.
-- Web fetching reads public pages but does not render JavaScript-heavy sites like a full browser automation engine.
+- Playwright renders JavaScript-heavy pages and can interact with ordinary page controls. Screenshots are saved to disk; image-based reasoning depends on the configured Oxion model supporting vision, which is not assumed by this code.
+- Browser HTTP(S) requests to private/local network targets and metadata hosts are blocked by default. Do not enable local access except in a trusted development workflow.
 - GitHub API access supports public repository endpoints; private access needs `GITHUB_TOKEN`.
 - Dependency installation and project scripts can execute third-party code. Inspect unfamiliar scripts and use a disposable, isolated container for untrusted code.
-- The agent must ask before deployment, remote pushes, destructive operations, credential changes, purchases, or other high-impact actions. Tool restrictions are not a full OS sandbox.
+- The agent must ask before deployment, remote pushes, destructive operations, credential changes, purchases, or other high-impact actions. It must not bypass CAPTCHAs or other anti-abuse/access-control protections. Tool restrictions are not a full OS sandbox.
 
 ## Create profiles
 
