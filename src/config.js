@@ -12,6 +12,9 @@ function loadEnvFile(file = path.resolve(".env")) {
   }
 }
 
+// Load local .env before reading any configuration values.
+loadEnvFile();
+
 const workspace = path.resolve(process.env.AGENT_WORKSPACE || "./workspace");
 
 export const config = {
