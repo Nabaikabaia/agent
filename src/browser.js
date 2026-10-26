@@ -270,6 +270,47 @@ async function browserEvaluate(args) {
   return { tab_id: tab.id, url: tab.page.url(), result: (serialized ?? "undefined").slice(0, MAX_TEXT) };
 }
 
+async function browserWait(args) {
+  const tab = getTab(args.tab_id);
+  const timeout = Math.min(60_000, Math.max(500, Number(args.timeout_ms) || 15_000));
+  if (args.selector) {
+    const state = ["visible", "hidden", "attached", "detached"].includes(args.state) ? args.state : "visible";
+    await tab.page.locator(args.selector).first().waitFor({ state, timeout });
+  } else if (args.text) {
+    const locator = tab.page.getByText(args.text).first();
+    const state = ["hidden", "attached", "detached"].includes(args.state) ? args.state : "visible";
+    await locator.waitFor({ state, timeout });
+  } else if (["load", "domcontentloaded", "networkidle"].includes(args.state)) {
+    await tab.page.waitForLoadState(args.state, { timeout });
+  } else if (args.wait_ms !== undefined) {
+    await tab.page.waitForTimeout(Math.min(10_000, Math.max(0, Number(args.wait_ms) || 0)));
+  } else {
+    throw new Error("Provide selector, text, a load state, or wait_ms.");
+  }
+  return { tab_id: tab.id, url: tab.page.url(), title: await tab.page.title(), ready_state: await tab.page.evaluate(() => document.readyState) };
+}
+
+async function browserUpload(args) {
+  const tab = getTab(args.tab_id);
+  const root = path.resolve(config.workspace);
+  const file = path.resolve(root, String(args.path || ""));
+  const relative = path.relative(root, file);
+  if (!args.path || relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
+    throw new Error("Upload path must be inside the configured workspace.");
+  }
+  const realRoot = await fs.realpath(root);
+  const realFile = await fs.realpath(file);
+  const realRelative = path.relative(realRoot, realFile);
+  if (realRelative === ".." || realRelative.startsWith(`..${path.sep}`) || path.isAbsolute(realRelative)) {
+    throw new Error("Upload path resolves outside the configured workspace.");
+  }
+  const stat = await fs.stat(realFile);
+  if (!stat.isFile()) throw new Error("Upload path is not a file.");
+  if (stat.size > 50 * 1024 * 1024) throw new Error("Uploads are limited to 50 MB per file.");
+  await tab.page.locator(args.selector).first().setInputFiles(realFile, { timeout: Math.min(30_000, Math.max(500, Number(args.timeout_ms) || 10_000)) });
+  return { tab_id: tab.id, uploaded: path.relative(root, realFile), bytes: stat.size };
+}
+
 async function browserBack(args) {
   const tab = getTab(args.tab_id);
   const response = await tab.page.goBack({ waitUntil: "domcontentloaded", timeout: 30_000 }).catch(() => null);
@@ -300,6 +341,8 @@ export async function executeBrowserTool(name, args) {
     case "browser_scroll": return await browserScroll(args);
     case "browser_screenshot": return await browserScreenshot(args);
     case "browser_evaluate": return await browserEvaluate(args);
+    case "browser_wait": return await browserWait(args);
+    case "browser_upload": return await browserUpload(args);
     case "browser_back": return await browserBack(args);
     case "browser_close": return await browserClose(args);
     case "browser_downloads": return await browserDownloads();
