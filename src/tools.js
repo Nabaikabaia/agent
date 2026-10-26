@@ -3,6 +3,7 @@ import path from "node:path";
 import { spawn } from "node:child_process";
 import { config } from "./config.js";
 import { executeBrowserTool } from "./browser.js";
+import { requestUserChoice } from "./interaction.js";
 
 const MAX_OUTPUT = 30_000;
 const DEFAULT_TIMEOUT_MS = 120_000;
@@ -32,6 +33,7 @@ export const toolDefinitions = [
   { type: "function", function: { name: "install_package", description: "Install a project dependency in the configured workspace using npm, pnpm, yarn, or bun. Choose dev=true for development-only packages. Do not install global packages.", parameters: { type: "object", properties: { package: { type: "string", minLength: 1 }, manager: { type: "string", enum: ["npm", "pnpm", "yarn", "bun"] }, dev: { type: "boolean" } }, required: ["package", "manager"], additionalProperties: false } } },
   { type: "function", function: { name: "run_command", description: "Run a command in the configured workspace for development, tests, builds, Git inspection, or project setup. Provide the executable and arguments as a single command string; shell operators, pipes, and redirections are not supported. Commands run without agent API credentials and are time/output limited. Inspect project scripts before running them.", parameters: { type: "object", properties: { command: { type: "string", minLength: 1 }, timeout_seconds: { type: "integer", minimum: 1, maximum: 300 } }, required: ["command"], additionalProperties: false } } },
   { type: "function", function: { name: "run_check", description: "Compatibility tool for common project checks and read-only Git inspection.", parameters: { type: "object", properties: { command: { type: "string", enum: ["npm run check", "npm test", "npm run test", "npm run build", "git status --short", "git diff --", "git log -5 --oneline"] } }, required: ["command"], additionalProperties: false } } },
+  { type: "function", function: { name: "ask_user", description: "Pause the current task and ask the configured Telegram owner a question with 2–8 custom in-message buttons. Use this when a decision, clarification, preference, or choice from the user is needed before continuing. Button labels should be short and meaningful. The task resumes with the exact selected choice. Never use this to request secrets.", parameters: { type: "object", properties: { prompt: { type: "string", minLength: 1, maxLength: 1200 }, choices: { type: "array", minItems: 2, maxItems: 8, items: { type: "string", minLength: 1, maxLength: 64 } }, timeout_seconds: { type: "integer", minimum: 10, maximum: 300 } }, required: ["prompt", "choices"], additionalProperties: false } } },
   { type: "function", function: { name: "browser_open", description: "Open a URL in a real headless Chromium browser using Playwright. JavaScript-rendered sites are supported. Creates a new isolated tab unless tab_id is provided. HTTP(S) only; local/private network targets are blocked by default.", parameters: { type: "object", properties: { url: { type: "string" }, tab_id: { type: "string" }, wait_until: { type: "string", enum: ["load", "domcontentloaded", "networkidle", "commit"] }, timeout_ms: { type: "integer", minimum: 1000, maximum: 60000 } }, required: ["url"], additionalProperties: false } } },
   { type: "function", function: { name: "browser_list_tabs", description: "List open Playwright browser tabs, titles, and URLs.", parameters: { type: "object", properties: {}, additionalProperties: false } } },
   { type: "function", function: { name: "browser_snapshot", description: "Inspect the current page DOM and visible text, links, buttons, inputs, and images. Use this before interacting with unfamiliar pages.", parameters: { type: "object", properties: { tab_id: { type: "string" } }, required: ["tab_id"], additionalProperties: false } } },
@@ -247,6 +249,7 @@ export async function executeTool(name, args) {
     case "install_package": return await installPackage(args);
     case "run_command": return await runCommand(args.command, args.timeout_seconds);
     case "run_check": return await runCheck(args);
+    case "ask_user": return await requestUserChoice(args);
     case "browser_open":
     case "browser_list_tabs":
     case "browser_snapshot":
