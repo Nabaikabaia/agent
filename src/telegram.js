@@ -4,6 +4,7 @@ import { config, validateConfig } from "./config.js";
 import { runAgent } from "./agent.js";
 import { listProfiles, loadProfile } from "./profiles.js";
 import { registerChoicePromptSender, resolveUserChoice } from "./interaction.js";
+import { initializePackageApprovals, registerPackageApprovalNotifier, decidePackageApproval } from "./approvals.js";
 
 const API = () => `https://api.telegram.org/bot${config.telegramBotToken}`;
 const MAX_MESSAGE_LENGTH = 3900;
@@ -345,6 +346,36 @@ async function handleCallback(callback) {
   const groupView = isGroup(chat);
   const action = data.slice(CALLBACK_PREFIX.length);
 
+  // Package installation approvals are persisted and can only be decided by the configured owner in private chat.
+  if (action.startsWith("pkg:")) {
+    if (!isOwner(userId) || chat?.type !== "private") {
+      await telegram("answerCallbackQuery", {
+        callback_query_id: callbackId,
+        text: "Only the owner can approve or reject package installation.",
+        show_alert: true
+      });
+      return;
+    }
+    const match = action.match(/^pkg:([a-f0-9]{12}):(approve|reject)$/);
+    if (!match) {
+      await telegram("answerCallbackQuery", { callback_query_id: callbackId, text: "Invalid approval button." });
+      return;
+    }
+    const result = await decidePackageApproval(match[1], match[2], userId, config.telegramOwnerId);
+    await telegram("answerCallbackQuery", {
+      callback_query_id: callbackId,
+      text: result.ok
+        ? (result.status === "approved" ? "Approved. The waiting task may continue." : "Rejected. The package will not be installed.")
+        : result.message,
+      show_alert: !result.ok
+    });
+    if (result.ok) {
+      const status = result.status === "approved" ? "Approved" : "Rejected";
+      await sendRich(chatId, `**Package request ${status.toLowerCase()}**\n\nPackage: \`${result.package}\`\nDecision: ${status}`);
+    }
+    return;
+  }
+
   // Dynamic task questions use short, one-time callback IDs and only accept the owner in private chat.
   if (action.startsWith("q:")) {
     if (!isOwner(userId) || chat?.type !== "private") {
@@ -507,6 +538,8 @@ async function handleMessage(message) {
     if (Array.isArray(result.history)) conversationHistory = result.history;
     await sendRich(chatId, `**Task finished**\n\n${result.answer}\n\n---\nCheckpoint: ${result.checkpoint}`, menuButtons());
   } catch (error) {
+    console.error("Agent task execution failed:", describeError(error));
+    if (error?.stack) console.error(error.stack);
     await sendRich(chatId, `**Task failed**\n\n${error.message || "Unknown error"}`, menuButtons());
   } finally {
     activeTask = null;
@@ -537,6 +570,14 @@ export async function startTelegramController() {
       data: `${CALLBACK_PREFIX}q:${id}:${index}`
     }));
     await sendRich(config.telegramOwnerId, prompt, buttons);
+  });
+
+  await initializePackageApprovals();
+  registerPackageApprovalNotifier(async ({ id, text }) => {
+    await sendRich(config.telegramOwnerId, text, [
+      { text: "Approve", data: `${CALLBACK_PREFIX}pkg:${id}:approve`, style: "success" },
+      { text: "Reject", data: `${CALLBACK_PREFIX}pkg:${id}:reject`, style: "danger" }
+    ]);
   });
 
   let offset = 0;
