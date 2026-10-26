@@ -242,7 +242,7 @@ async function sendRich(chatId, text, buttons = [], options = {}) {
     return await telegram("sendRichMessage", payload);
   } catch (error) {
     const canFallback = Boolean(error?.telegramStatus) ||
-      /method not found|unknown method|unsupported method|not found/i.test(error?.telegramDescription || error?.message || "");
+      /method not found|unknown method|unsupported method|not found|http 404/i.test(error?.telegramDescription || error?.message || "");
     if (!canFallback) throw error;
 
     // If this Bot API server rejects Rich Messages for any reason, retry as a standard message.
