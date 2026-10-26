@@ -14,7 +14,7 @@ const COMMANDS = new Set([
 const DENIED_COMMANDS = new Set(["sudo", "su", "shutdown", "reboot", "mkfs", "dd", "mount", "umount", "passwd", "useradd", "userdel", "iptables", "systemctl"]);
 const DENIED_PATTERNS = [
   /(^|\s)rm\s+(-[^\s]*r[^\s]*f|-[^\s]*f[^\s]*r)\b/i,
-  /\b(git\s+push\s+--force|git\s+reset\s+--hard|git\s+clean\s+-[a-z]*f|npm\s+publish)\b/i,
+  /\b(git\s+push|git\s+reset\s+--hard|git\s+clean\s+-[a-z]*f|npm\s+publish)\b/i,
   /\b(curl|wget)\b[^\n|]*\|\s*(sh|bash|zsh)\b/i,
   /\b(chmod\s+777|chown\s+-R)\b/i
 ];
