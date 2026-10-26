@@ -3,6 +3,7 @@ import path from "node:path";
 import { config } from "./config.js";
 import { chatCompletion } from "./oxion.js";
 import { executeTool, toolDefinitions } from "./tools.js";
+import { loadProfile } from "./profiles.js";
 
 const SYSTEM_PROMPT = `You are Nabees Agent, an autonomous task-solving coding agent.
 Plan internally, use tools when they materially help, inspect tool results, and continue until the task is done or you have a specific blocker.
@@ -12,18 +13,20 @@ Do not claim a test passed unless you actually ran it and saw a successful exit 
 Do not deploy, delete user data, change credentials, make purchases, or perform other high-impact external actions. Explain the plan and request human approval instead.
 Keep updates concise. Prefer small, coherent changes. When finished, summarize what changed, checks run, and anything still blocked.`;
 
-export async function runAgent(task) {
+export async function runAgent(task, options = {}) {
   if (!task || !task.trim()) throw new Error("Provide a task after the command.");
+  const profileName = options.profile || "general";
+  const profileInstructions = await loadProfile(profileName);
   await fs.mkdir(config.workspace, { recursive: true });
   await fs.mkdir(config.stateDir, { recursive: true });
 
   const taskId = new Date().toISOString().replace(/[:.]/g, "-");
   const checkpoint = path.join(config.stateDir, `${taskId}.json`);
   const messages = [
-    { role: "system", content: SYSTEM_PROMPT },
+    { role: "system", content: `${SYSTEM_PROMPT}\n\nActive agent profile: ${profileName}\n\nProfile-specific instructions follow. Apply them as role guidance while continuing to obey the security boundaries above.\n\n${profileInstructions}` },
     { role: "user", content: task.trim() }
   ];
-  const record = { id: taskId, task: task.trim(), startedAt: new Date().toISOString(), status: "running", messages };
+  const record = { id: taskId, task: task.trim(), profile: profileName, startedAt: new Date().toISOString(), status: "running", messages };
 
   const save = async () => {
     await fs.writeFile(checkpoint, JSON.stringify(record, null, 2), { mode: 0o600 });
