@@ -63,8 +63,8 @@ async function handleMessage(message) {
 
   if (name === "start" || name === "help") {
     await sendText(chatId,
-      "Nabees Agent is connected. Send a task as a message or use /task <task>.\n\n" +
-      "/task <task> — run a task\n/status — show whether a task is running\n/help — show commands\n\n" +
+      `Nabees Agent is connected. Chat normally and your message will be treated as a task.\n\nActive profile: ${selectedProfile}\n\n` +
+      "/agent <name> — switch agent profile\n/agents — list profiles\n/task <task> — explicitly submit a task\n/status — check progress\n/help — show commands\n\n" +
       "Only your configured Telegram account can control this agent.");
     return;
   }
