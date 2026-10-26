@@ -5,6 +5,7 @@ Node.js autonomous agent powered by Oxion AI. It accepts natural-language tasks 
 ## Capabilities
 
 - Natural-chat Telegram control with native Rich Messages, styled in-message buttons, callback handling, and private ephemeral replies to button taps in groups; Markdown profiles in `agents/*.md`.
+- Dynamic in-message choice prompts: the agent can pause a task, ask the owner a question with 2–8 context-specific buttons, and continue using the selected answer. Prompts expire after a timeout.
 - Workspace file listing, reading, and writing.
 - Public web search and readable-page fetching.
 - Real Playwright Chromium browser: JavaScript-rendered pages, multiple isolated tabs, DOM snapshots, clicks, form filling, keyboard input, selects, scrolling, condition-based waits, workspace file uploads, page-context JavaScript, screenshots, and downloads.
@@ -34,7 +35,7 @@ npm run check
 npm run telegram
 ```
 
-Send `/start` to the bot, then chat normally. Telegram replies use Rich Messages with native buttons for Status, Help, and Profiles. In groups, `/start` or `/help` posts a small menu; tapping its buttons returns an ephemeral response visible only to the person who tapped it. Task execution and profile switching remain restricted to the configured owner's private chat. These features require a Telegram Bot API server/client version that supports Rich Messages and ephemeral messages. Example tasks:
+Send `/start` to the bot, then chat normally. Telegram replies use Rich Messages with native buttons for Status, Help, and Profiles. During a task, the agent can also create custom choice buttons when it needs your decision; selecting one resumes the paused task. In groups, `/start` or `/help` posts a small menu; tapping its buttons returns an ephemeral response visible only to the person who tapped it. Task execution and profile switching remain restricted to the configured owner's private chat. Rich Messages require a Telegram Bot API server that supports them; if `sendRichMessage` is unavailable, the controller falls back to regular messages with inline callback buttons. Ephemeral replies require a compatible Bot API server. Example tasks:
 
 - Inspect this project, install its dependencies, run its tests, and fix errors.
 - Research a library, read its documentation, inspect its GitHub repository, and assess whether it fits my project.
