@@ -2,10 +2,12 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { config, validateConfig } from "./config.js";
 import { runAgent } from "./agent.js";
+import { listProfiles, loadProfile } from "./profiles.js";
 
 const API = () => `https://api.telegram.org/bot${config.telegramBotToken}`;
 const MAX_MESSAGE_LENGTH = 3900;
 let activeTask = null;
+let selectedProfile = "general";
 let stopping = false;
 
 async function telegram(method, payload = {}) {
@@ -68,8 +70,30 @@ async function handleMessage(message) {
   }
   if (name === "status") {
     await sendText(chatId, activeTask
-      ? `Task is running.\nTask: ${activeTask.task.slice(0, 700)}\nStarted: ${activeTask.startedAt}`
-      : "Agent is idle and ready for a task.");
+      ? `Task is running.\nProfile: ${activeTask.profile}\nTask: ${activeTask.task.slice(0, 700)}\nStarted: ${activeTask.startedAt}`
+      : `Agent is idle and ready for a task. Active profile: ${selectedProfile}`);
+    return;
+  }
+  if (name === "agents") {
+    const profiles = await listProfiles();
+    await sendText(chatId, "Available agent profiles:\n\n" +
+      profiles.map((profile) => `• ${profile.name} — ${profile.description}`).join("\n") +
+      "\n\nSwitch with /agent <name>. Add your own .md file in the agents/ directory.");
+    return;
+  }
+  if (name === "agent") {
+    if (!argument) {
+      await sendText(chatId, `Current profile: ${selectedProfile}\nUse /agents to list profiles or /agent <name> to switch.`);
+      return;
+    }
+    const requestedProfile = argument.toLowerCase();
+    try {
+      await loadProfile(requestedProfile);
+      selectedProfile = requestedProfile;
+      await sendText(chatId, `Switched to the ${selectedProfile} agent profile. Send your next task as a normal message.`);
+    } catch (error) {
+      await sendText(chatId, `${error.message}\nUse /agents to list available profiles.`);
+    }
     return;
   }
   if (name && name !== "task") {
@@ -87,10 +111,10 @@ async function handleMessage(message) {
     return;
   }
 
-  activeTask = { task, startedAt: new Date().toISOString() };
-  await sendText(chatId, `Task received. Working on it now.\n\n${task.slice(0, 700)}`, message.message_id);
+  activeTask = { task, profile: selectedProfile, startedAt: new Date().toISOString() };
+  await sendText(chatId, `Task received.\nProfile: ${selectedProfile}\nWorking on it now.\n\n${task.slice(0, 700)}`, message.message_id);
   try {
-    const result = await runAgent(task);
+    const result = await runAgent(task, { profile: activeTask.profile });
     await sendText(chatId, `Task finished.\n\n${result.answer}\n\nCheckpoint: ${result.checkpoint}`);
   } catch (error) {
     await sendText(chatId, `Task failed: ${error.message || "Unknown error"}`);
