@@ -1,117 +1,62 @@
 # Nabees Autonomous Agent
 
-A structured Node.js autonomous agent powered by Oxion AI's OpenAI-compatible API and native tool calling. It can plan tasks, use its available tools, inspect results, and continue until the task is done or it reaches its step limit.
+Node.js autonomous agent powered by Oxion AI. It accepts natural-language tasks through Telegram and uses tools to research, inspect files, install project dependencies, work with GitHub, and run project checks.
 
-## Current capabilities
+## Capabilities
 
-- Natural-chat Telegram control: send a normal message; no task prefix is required.
-- Optional commands for status, help, and switching between Markdown agent profiles.
-- Separate agent profiles in `agents/*.md`, each with its own role and skill instructions.
-- Native model tool-calling loop.
-- Read, create, and edit files inside a configured workspace.
-- Search the public web using DuckDuckGo HTML results.
-- Run a limited set of project checks and read-only Git commands.
-- Save task checkpoints locally.
-- Telegram control is restricted to one configured numeric owner ID.
-- No third-party Node dependencies.
+- Natural-chat Telegram control and Markdown profiles in `agents/*.md`.
+- Workspace file listing, reading, and writing.
+- Public web search and readable-page fetching.
+- GitHub REST API access for repositories, contents, commits, issues, pull requests, releases, and search.
+- Project-local package installation with npm, pnpm, yarn, or bun.
+- Controlled one-command-at-a-time execution for development, tests, builds, and Git inspection.
+- Local task checkpoints and short-lived conversational context.
 
 ## Setup
 
-Requires Node.js 20+.
+Requires Node.js 20+ and a running Box/workspace.
 
 1. Copy `.env.example` to `.env`.
-2. Add your Oxion API key to `OXION_API_KEY`.
-3. Confirm the model ID shown in your Oxion dashboard and set `OXION_MODEL` accordingly.
-4. Create a Telegram bot with Telegram's official **@BotFather**: send `/newbot`, follow the prompts, and copy the bot token.
-5. Find your numeric Telegram user ID (for example, with **@userinfobot**).
-6. Put the bot token and your numeric user ID in `.env`:
+2. Set `OXION_API_KEY` and verify `OXION_MODEL` in your Oxion dashboard.
+3. Create a bot with Telegram **@BotFather** and find your numeric Telegram user ID.
+4. Set `TELEGRAM_BOT_TOKEN` and `TELEGRAM_OWNER_ID`.
+5. Optional: set `GITHUB_TOKEN` to a least-privilege token for private repositories and higher API limits. Public GitHub API access works without it.
 
-```env
-OXION_API_KEY=your_oxion_key
-OXION_BASE_URL=https://www.oxionai.com/v1
-OXION_MODEL=deepseek-v4-flash-0731
-TELEGRAM_BOT_TOKEN=your_botfather_token
-TELEGRAM_OWNER_ID=your_numeric_telegram_user_id
-```
-
-Keep `.env` private; never paste the tokens into chat or commit them.
+Never paste credentials into chat or commit `.env`.
 
 ## Run
 
-Check syntax:
-
 ```sh
 npm run check
-```
-
-Start Telegram polling:
-
-```sh
 npm run telegram
 ```
 
-Open the bot and send `/start`. After that, **just chat normally**. For example, send:
+Send `/start` to the bot, then chat normally. Example tasks:
 
-```text
-Look through my workspace and explain how the project works.
-```
+- Inspect this project, install its dependencies, run its tests, and fix errors.
+- Research a library, read its documentation, inspect its GitHub repository, and assess whether it fits my project.
+- Clone my public repository into the workspace and explain its structure.
 
-The controller treats normal text as a task, and keeps the last 10 user/agent exchanges as conversational context for follow-up messages. This chat context currently lives in memory and resets when the controller restarts. Commands are optional:
+The Telegram controller keeps up to 10 exchanges in memory; context resets when it restarts. Only one task runs at a time.
 
-- `/agents` — list Markdown profiles.
-- `/agent coder` — use the coding profile for the next messages.
-- `/agent researcher` — use the research profile.
-- `/agent general` — return to the general profile.
-- `/agent` — show the selected profile.
-- `/status` — check the current task.
-- `/help` — show help.
-- `/task <task>` — explicitly submit a task if you prefer.
+## Commands
 
-Only one task runs at a time. The selected profile and recent chat context currently reset when the Telegram controller restarts. Keep the controller process running in your Box or configure the Box to start `npm run telegram` automatically. Do not run multiple controller instances with the same bot token. If the bot has a webhook configured, remove it before using this long-polling controller.
+- `/agents` — list profiles.
+- `/agent coder`, `/agent researcher`, `/agent general` — switch profile.
+- `/agent` — show active profile.
+- `/status` — check progress.
+- `/help` — show commands.
+- `/task <task>` — explicit task submission.
 
-## Create your own agent profile
+## Tool boundaries
 
-Add a Markdown file to the `agents/` directory. The filename (without `.md`) becomes the profile name. For example, create `agents/designer.md`:
+- Package installation is project-local; global installs are unsupported.
+- Commands run without a shell, have a supported executable list, timeouts, and output limits. Pipes and redirections are unsupported.
+- Web fetching reads public pages but does not render JavaScript-heavy sites like a full browser automation engine.
+- GitHub API access supports public repository endpoints; private access needs `GITHUB_TOKEN`.
+- Dependency installation and project scripts can execute third-party code. Inspect unfamiliar scripts and use a disposable, isolated container for untrusted code.
+- The agent must ask before deployment, remote pushes, destructive operations, credential changes, purchases, or other high-impact actions. Tool restrictions are not a full OS sandbox.
 
-```md
-# Design Agent
+## Create profiles
 
-You are a product and UI design specialist. Review existing design constraints before proposing changes.
-Prefer polished, accessible, responsive interfaces and clear implementation steps.
-```
-
-Then send `/agents` in Telegram and select it with `/agent designer`. The profile is read for each task, so edits to an existing profile apply to the next task without rebuilding the code. Profiles are role instructions, not new tools; they can only use capabilities currently exposed to the agent.
-
-Included profiles:
-- `agents/general.md` — general-purpose assistant (default)
-- `agents/coder.md` — software engineering
-- `agents/researcher.md` — research and evidence synthesis
-
-Treat profile files as trusted instructions: anyone who can edit them can change agent behavior. Do not put API keys, passwords, or other secrets in profile files.
-
-## Security boundaries
-
-- Only messages from `TELEGRAM_OWNER_ID` in a private chat can control the agent.
-- Keep the Oxion API key and Telegram bot token in `.env`, never in source control.
-- File tools reject paths that resolve outside `AGENT_WORKSPACE`.
-- Shell access is intentionally narrow: only approved test/build scripts and read-only Git inspection commands are exposed.
-- The agent does not deploy, delete user data, change credentials, make purchases, or perform other high-impact actions automatically.
-- Run in a disposable/containerized environment for untrusted repositories. A workspace path check is not a full operating-system sandbox; project scripts can execute code when run.
-
-## Layout
-
-```text
-src/
-  config.js    Environment loading and validation
-  oxion.js     OpenAI-compatible API client
-  tools.js     Explicit tool schemas and guarded implementations
-  agent.js     Agent loop and local checkpoint
-  profiles.js  Markdown profile loader
-  index.js     Terminal entry point
-  telegram.js  Owner-only Telegram chat controller
-agents/
-  general.md
-  coder.md
-  researcher.md
-  README.md
-```
+Add `agents/designer.md` with role-specific instructions, then select it using `/agent designer`. Profiles provide guidance and use the tools exposed by the runtime. Keep secrets out of profile files.
