@@ -1,0 +1,12 @@
+{
+  "name": "nabees-autonomous-agent",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A tool-using autonomous coding agent powered by Oxion AI.",
+  "type": "module",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "start": "node src/index.js",
+    "check": "node --check src/index.js && node --check src/agent.js && node --check src/oxion.js && node --check src/tools.js && node --check src/config.js"
+  }
+}
