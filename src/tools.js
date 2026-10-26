@@ -188,7 +188,7 @@ function validateCommand(args, original, allowPackageInstall = false) {
   const executable = path.basename(args[0]).toLowerCase();
   if (!COMMANDS.has(executable) || DENIED_COMMANDS.has(executable)) throw new Error(`Command '${executable}' is not on the supported executable list.`);
   if (DENIED_PATTERNS.some((pattern) => pattern.test(original))) throw new Error("This potentially destructive or unsafe command is blocked.");
-  if (!allowPackageInstall && /\\b(npm\\s+(?:install|i)|pnpm\\s+(?:add|install|i)|yarn\\s+(?:add|install)|bun\\s+(?:add|install))\\b/i.test(original)) {
+  if (!allowPackageInstall && /\b(npm\s+(?:install|i)|pnpm\s+(?:add|install|i)|yarn\s+(?:add|install)|bun\s+(?:add|install))\b/i.test(original)) {
     throw new Error("Package installation must use the install_package tool, which requests owner approval in Telegram.");
   }
   if (args.some((arg) => arg === "--force-with-lease" || arg === "--no-verify")) throw new Error("This command includes a blocked bypass/force option.");
