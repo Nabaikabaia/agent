@@ -265,13 +265,74 @@ function escapeHtml(value) {
 }
 
 function markdownToHtml(markdown) {
-  return String(markdown ?? "").split("```").map((part, index) => {
-    if (index % 2 === 1) return "<pre>" + escapeHtml(part.replace(/^\w+\n/, "")) + "</pre>";
-    return escapeHtml(part)
-      .replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>")
-      .replace(/(?<!\*)\*([^*]+)\*(?!\*)/g, "<i>$1</i>")
-      .replace(/`([^`]+)`/g, "<code>$1</code>");
-  }).join("");
+  const inline = (value) => escapeHtml(value)
+    .replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>")
+    .replace(/(?<!\*)\*([^*]+)\*(?!\*)/g, "<i>$1</i>")
+    .replace(/\x60([^\x60]+)\x60/g, "<code>$1</code>");
+
+  const source = String(markdown ?? "").replace(/\r/g, "");
+  const blocks = source.split("\x60\x60\x60");
+  return blocks.map((block, index) => {
+    if (index % 2 === 1) {
+      const code = block.replace(/^\w+[+-]*\n/, "").replace(/^\n|\n$/g, "");
+      return "<pre>" + escapeHtml(code) + "</pre>";
+    }
+
+    const lines = block.split("\n");
+    const rendered = [];
+    let paragraph = [];
+    let list = [];
+    const flushParagraph = () => {
+      if (paragraph.length) {
+        rendered.push(inline(paragraph.join("\n")));
+        paragraph = [];
+      }
+    };
+    const flushList = () => {
+      if (list.length) {
+        rendered.push(list.map((item) => "• " + inline(item)).join("\n"));
+        list = [];
+      }
+    };
+
+    for (const line of lines) {
+      if (!line.trim()) {
+        flushParagraph();
+        flushList();
+        if (rendered.length && rendered[rendered.length - 1] !== "") rendered.push("");
+        continue;
+      }
+
+      const heading = line.match(/^\s*#{1,6}\s+(.+)$/);
+      if (heading) {
+        flushParagraph();
+        flushList();
+        rendered.push("<b>" + inline(heading[1]) + "</b>");
+        continue;
+      }
+
+      if (/^\s*(---+|___+|\*\*\*+)\s*$/.test(line)) {
+        flushParagraph();
+        flushList();
+        rendered.push("────────");
+        continue;
+      }
+
+      const item = line.match(/^\s*(?:[-*+]\s+|\d+[.)]\s+)(.+)$/);
+      if (item) {
+        flushParagraph();
+        list.push(item[1]);
+        continue;
+      }
+
+      flushList();
+      paragraph.push(line);
+    }
+
+    flushParagraph();
+    flushList();
+    return rendered.join("\n").replace(/\n{3,}/g, "\n\n");
+  }).join("\n");
 }
 
 function humanizeTool(name) {
