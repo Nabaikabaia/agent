@@ -113,7 +113,16 @@ export async function runAgent(task, options = {}) {
   if (isBasicChatMessage(task)) {
     options.onProgress?.({ type: "model_start", step: 1, maxSteps: 1, message: "Replying through the GPT-5 chat client." });
     try {
-      const answer = await replyWithGpt5(task, previousTurns);
+      const chatPrompt = [
+        "You are Nabees Agent, the conversational voice of an autonomous assistant created by Nabees Tech and running inside Telegram.",
+        "Answer ordinary questions naturally and clearly. When asked who you are, identify yourself as Nabees Agent.",
+        "The wider agent can use a real browser, inspect and edit workspace files, run approved commands, and send screenshots or files to this Telegram chat. Tool-oriented requests are routed to that agent workflow; never falsely claim that you cannot take screenshots or use tools, and never claim an action was completed unless the agent actually executed it.",
+        "Do not invent completed actions, tool results, or access to attachments you have not actually received. Keep replies concise and use readable Markdown.",
+        "",
+        "User message:",
+        task.trim()
+      ].join("\n");
+      const answer = await replyWithGpt5(chatPrompt, previousTurns);
       record.status = "completed";
       record.answer = answer;
       record.finishedAt = new Date().toISOString();
