@@ -8,7 +8,7 @@ Node.js autonomous agent powered by OpenRouter (configurable with an OpenAI-comp
 - Dynamic in-message choice prompts: the agent can pause a task, ask the owner a question with 2–8 context-specific buttons, and continue using the selected answer. Prompts expire after a timeout.
 - Workspace file listing, reading, and writing.
 - Public web search and readable-page fetching.
-- Camofox/Camoufox is the default browser backend, with accessibility snapshots, element refs, JavaScript evaluation, form interaction, upload/download handling, screenshots, links, images, navigation history and tab management. Playwright Chromium remains available as an optional fallback.
+- Patchright-controlled Chromium is the default browser backend, with DOM snapshots, JavaScript evaluation, form interaction, upload/download handling, screenshots, links, images, navigation history and tab management.
 - Browser downloads and screenshots saved under the configured workspace, with Telegram photo delivery for screenshots and document delivery for downloadable files sent to the configured owner. Document delivery is limited to files in the configured workspace, blocks common secret/key files, and enforces a 45 MB limit.
 - GitHub REST API access for repositories, contents, commits, issues, pull requests, releases, and search.
 - Owner-requested private-repository updates using `GITHUB_TOKEN`, with fixed-origin validation, a clean-working-tree check, and fast-forward-only pulls.
@@ -17,28 +17,22 @@ Node.js autonomous agent powered by OpenRouter (configurable with an OpenAI-comp
 - Local task checkpoints and short-lived conversational context. Agent work automatically continues across up to three batches when it reaches `AGENT_MAX_STEPS`, with a maximum of 60 model steps per task.
 
 
-## Camofox browser backend
+## Patchright browser backend
 
-Camofox is the default browser backend. The agent starts the Camofox browser service automatically the first time it needs a browser tool. It first checks whether a compatible local service is already running. Otherwise, it finds an available port starting at `9377`, launches `@askjo/camofox-browser`, waits for the service health and API checks, and updates its in-memory browser URL. If the first-run install is needed, npm downloads the package and Camoufox browser bundle (roughly 300 MB). The service binds to loopback only and receives a generated access key if you have not supplied one.
+Patchright is the agent's only browser automation backend. It is a Playwright-compatible, Chromium-focused alternative designed to reduce common automation-detection signals. The browser adapter runs Chromium locally inside the Box and does not require a hosted browser service or a separate browser daemon.
 
-No manual base URL or access key is normally needed for a local service. Optional settings:
+Install dependencies and the Chromium build with:
 
-```dotenv
-BROWSER_BACKEND=camofox
-# Optional preferred local port; if occupied, the agent searches subsequent ports.
-CAMOFOX_BASE_URL=http://127.0.0.1:9377
-# Optional stable key; otherwise one is generated at runtime for the local service.
-CAMOFOX_ACCESS_KEY=
-CAMOFOX_USER_ID=nabees-agent
-CAMOFOX_SESSION_KEY=telegram
-# Set false to disable automatic local startup.
-CAMOFOX_AUTOSTART=true
+```sh
+npm install
+npm run browser:install
 ```
 
-If `CAMOFOX_BASE_URL` points to a remote host, the agent will connect to it but will not attempt to start a service on that remote machine. Set the matching `CAMOFOX_ACCESS_KEY` when the remote service uses authentication. Keep the browser-control API private; do not expose it unauthenticated to the public internet. Set `BROWSER_BACKEND=playwright` only if you intentionally want to switch back to Playwright.
+The installer downloads the Chromium build used by Patchright. The Box must also provide the operating-system libraries required by Chromium. On Linux ARM64, use the Chromium build rather than the Google Chrome installer; the Chrome installer has had ARM64 limitations. Patchright can reduce some automation signals, but it does not guarantee access to every site and must not be used to bypass CAPTCHAs or other access-control challenges.
 
-The adapter supports opening/navigating/listing tabs, snapshots, click/type/press/scroll/wait, page-context JavaScript evaluation, native select changes, file upload, screenshots, links/images, downloads, back/forward, refresh, and close. Uploads require the agent and Camofox service to share a filesystem path inside Camofox's configured upload directory. Camofox may improve compatibility on some sites, but it is not guaranteed to pass every anti-bot challenge; the agent must not attempt to defeat access-control challenges.
+The browser tools support opening/navigating/listing tabs, DOM snapshots, click/type/press/scroll/wait, page-context JavaScript evaluation, native select changes, file upload, screenshots, links, images, downloads, back/forward, refresh, and tab closing. Downloads and screenshots are saved under the configured workspace.
 
+`BROWSER_ALLOW_LOCALHOST=false` remains the default. Browser HTTP(S) requests to private/local network targets and metadata hosts are blocked by default.
 ## Chat providers
 
 - Ordinary conversational messages (for example, greetings and general questions) use the previously shared Android ChatGPT anonymous endpoint through `src/gpt5.js`; this path does not use the OpenRouter API key or its free-model quota.
@@ -86,7 +80,7 @@ The Telegram controller keeps up to 10 exchanges in memory; context resets when 
 
 - Package installation is project-local; global installs are unsupported. Each package installation request requires explicit owner approval in Telegram. Rejecting, timing out, or restarting while awaiting a decision does not install the package.
 - Commands run without a shell, have a supported executable list, timeouts, and output limits. Pipes and redirections are unsupported.
-- Playwright renders JavaScript-heavy pages and can interact with ordinary page controls. Screenshots are saved to disk and can be sent to the configured Telegram owner using `send_telegram_photo`; image-based reasoning depends on the configured model supporting vision, which is not assumed by this code.
+- Patchright-controlled Chromium renders JavaScript-heavy pages and can interact with ordinary page controls. Screenshots are saved to disk and can be sent to the configured Telegram owner using `send_telegram_photo`; image-based reasoning depends on the configured model supporting vision, which is not assumed by this code.
 - Browser HTTP(S) requests to private/local network targets and metadata hosts are blocked by default. Do not enable local access except in a trusted development workflow.
 - GitHub API access supports public repository endpoints; private access needs `GITHUB_TOKEN`.
 - When the owner requests an agent update, `update_repository` uses `GITHUB_TOKEN` only for the fixed `https://github.com/Nabaikabaia/agent` origin. It refuses uncommitted local changes and uses `git pull --ff-only`; it does not configure a credential-bearing remote URL, print the token, or automatically update on every push. The workspace must already be a Git clone with that HTTPS origin.

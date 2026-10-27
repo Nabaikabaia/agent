@@ -2,9 +2,8 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import dns from "node:dns/promises";
 import net from "node:net";
-import { chromium } from "playwright";
+import { chromium } from "patchright";
 import { config } from "./config.js";
-import { executeCamofoxTool } from "./camofox.js";
 
 const MAX_TEXT = 24_000;
 const tabs = new Map();
@@ -34,7 +33,7 @@ function isPrivateAddress(address) {
   return true;
 }
 
-async function validateBrowserUrl(value) {
+export async function validateBrowserUrl(value) {
   let url;
   try { url = new URL(value); } catch { throw new Error("Provide a valid absolute URL."); }
   if (!["http:", "https:"].includes(url.protocol)) throw new Error("The browser only navigates to HTTP(S) URLs.");
@@ -70,7 +69,7 @@ async function getBrowser() {
       args: ["--no-sandbox", "--disable-dev-shm-usage"]
     }).catch((error) => {
       browserPromise = undefined;
-      throw new Error(`Playwright could not launch Chromium. Run "npx playwright install chromium" and verify the Box has the required system libraries. Details: ${error.message}`);
+      throw new Error(`Playwright could not launch Chromium. Run "npx patchright install chromium" and verify the Box has the required system libraries. Details: ${error.message}`);
     });
   }
   return browserPromise;
@@ -329,11 +328,42 @@ async function browserDownloads() {
   return downloadLog.slice(-50);
 }
 
+async function browserForward(args) {
+  const tab = getTab(args.tab_id);
+  const response = await tab.page.goForward({ waitUntil: "domcontentloaded", timeout: 30_000 }).catch(() => null);
+  return { tab_id: tab.id, url: tab.page.url(), title: await tab.page.title(), status: response?.status() ?? null };
+}
+
+async function browserRefresh(args) {
+  const tab = getTab(args.tab_id);
+  const response = await tab.page.reload({ waitUntil: "domcontentloaded", timeout: 30_000 }).catch(() => null);
+  return { tab_id: tab.id, url: tab.page.url(), title: await tab.page.title(), status: response?.status() ?? null };
+}
+
+async function browserLinks(args) {
+  const tab = getTab(args.tab_id);
+  const links = await tab.page.locator("a[href]").evaluateAll((items) => items.slice(0, 200).map((item) => ({
+    text: (item.innerText || item.getAttribute("aria-label") || "").replace(/\s+/g, " ").trim().slice(0, 500),
+    href: item.href,
+    title: item.title || ""
+  })));
+  return { tab_id: tab.id, url: tab.page.url(), links };
+}
+
+async function browserImages(args) {
+  const tab = getTab(args.tab_id);
+  const images = await tab.page.locator("img").evaluateAll((items) => items.slice(0, 100).map((item) => ({
+    src: item.currentSrc || item.src,
+    alt: item.alt || "",
+    title: item.title || "",
+    width: item.naturalWidth || item.width || 0,
+    height: item.naturalHeight || item.height || 0
+  })));
+  return { tab_id: tab.id, url: tab.page.url(), images };
+}
+
+
 export async function executeBrowserTool(name, args) {
-  if (config.browserBackend === "camofox") {
-    if (name === "browser_open") await validateBrowserUrl(args.url);
-    return await executeCamofoxTool(name, args);
-  }
   switch (name) {
     case "browser_open": return await browserOpen(args);
     case "browser_list_tabs": return await browserListTabs();
@@ -351,6 +381,10 @@ export async function executeBrowserTool(name, args) {
     case "browser_back": return await browserBack(args);
     case "browser_close": return await browserClose(args);
     case "browser_downloads": return await browserDownloads();
+    case "browser_forward": return await browserForward(args);
+    case "browser_refresh": return await browserRefresh(args);
+    case "browser_links": return await browserLinks(args);
+    case "browser_images": return await browserImages(args);
     default: throw new Error(`Unknown browser tool: ${name}`);
   }
 }
