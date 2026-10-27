@@ -16,14 +16,24 @@ function loadEnvFile(file = path.resolve(".env")) {
 loadEnvFile();
 
 const workspace = path.resolve(process.env.AGENT_WORKSPACE || "./workspace");
+const inceptionKey = process.env.INCEPTION_API_KEY || process.env.INCEPTIONLABS_API_KEY || process.env.INCEPTION_LABS_API_KEY || "";
+const provider = (process.env.AI_PROVIDER || process.env.OXION_PROVIDER || (inceptionKey ? "inception" : "openrouter")).trim().toLowerCase();
+const isInception = provider === "inception" || provider === "inceptionlabs";
 
 export const config = {
-  apiKey: process.env.OPENROUTER_API_KEY || process.env.AI_API_KEY || process.env.OXION_API_KEY || "",
+  provider,
+  apiKey: isInception
+    ? inceptionKey
+    : (process.env.OPENROUTER_API_KEY || process.env.AI_API_KEY || process.env.OXION_API_KEY || ""),
   telegramBotToken: process.env.TELEGRAM_BOT_TOKEN || "",
   telegramOwnerId: process.env.TELEGRAM_OWNER_ID || "",
   githubToken: process.env.GITHUB_TOKEN || "",
-  baseUrl: (process.env.OPENROUTER_BASE_URL || process.env.AI_BASE_URL || process.env.OXION_BASE_URL || "https://openrouter.ai/api/v1").replace(/\/+$/, ""),
-  model: process.env.OPENROUTER_MODEL || process.env.AI_MODEL || process.env.OXION_MODEL || "nvidia/nemotron-3-ultra-550b-a55b:free",
+  baseUrl: (isInception
+    ? (process.env.INCEPTION_BASE_URL || "https://api.inceptionlabs.ai/v1")
+    : (process.env.OPENROUTER_BASE_URL || process.env.AI_BASE_URL || process.env.OXION_BASE_URL || "https://openrouter.ai/api/v1")).replace(/\/+$/, ""),
+  model: isInception
+    ? (process.env.INCEPTION_MODEL || "mercury-3")
+    : (process.env.OPENROUTER_MODEL || process.env.AI_MODEL || process.env.OXION_MODEL || "nvidia/nemotron-3-ultra-550b-a55b:free"),
   workspace,
   stateDir: path.resolve(".agent-state"),
   agentsDir: path.resolve(process.env.AGENT_PROFILES_DIR || "./agents"),
@@ -32,6 +42,11 @@ export const config = {
 };
 
 export function validateConfig() {
-  if (!config.apiKey) throw new Error("Missing API key. Set OPENROUTER_API_KEY in .env (see .env.example).");
+  if (!config.apiKey) {
+    const variable = config.provider === "inception" || config.provider === "inceptionlabs"
+      ? "INCEPTION_API_KEY"
+      : "OPENROUTER_API_KEY";
+    throw new Error(\`Missing API key for provider "\${config.provider}". Set \${variable} in .env.\`);
+  }
   if (!/^https:\/\//i.test(config.baseUrl)) throw new Error("AI API base URL must use HTTPS.");
 }
