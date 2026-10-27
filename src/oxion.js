@@ -1,21 +1,29 @@
 import { config } from "./config.js";
 
 export async function chatCompletion(messages, tools) {
-  const response = await fetch(`${config.baseUrl}/chat/completions`, {
-    method: "POST",
-    headers: {
-      "Authorization": `Bearer ${config.apiKey}`,
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify({
-      model: config.model,
-      messages,
-      tools,
-      tool_choice: "auto",
-      stream: false
-    }),
-    signal: AbortSignal.timeout(120_000)
-  });
+  let response;
+  try {
+    response = await fetch(`${config.baseUrl}/chat/completions`, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${config.apiKey}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        model: config.model,
+        messages,
+        tools,
+        tool_choice: "auto",
+        stream: false
+      }),
+      signal: AbortSignal.timeout(config.aiRequestTimeoutMs)
+    });
+  } catch (error) {
+    if (error?.name === "TimeoutError" || error?.name === "AbortError") {
+      throw new Error(`AI provider request timed out after ${Math.round(config.aiRequestTimeoutMs / 1000)} seconds. The provider/model may be overloaded; try again or choose another OpenRouter model.`, { cause: error });
+    }
+    throw error;
+  }
 
   const raw = await response.text();
   let data;
