@@ -37,9 +37,15 @@ export async function runAgent(task, options = {}) {
   };
   await save();
 
+  // AGENT_MAX_STEPS controls each work batch. If the task is still active at
+  // a batch boundary, automatically continue from the saved tool results, up to
+  // three batches total, rather than stopping immediately at the first limit.
+  const batchSize = config.maxSteps;
+  const maxTotalSteps = Math.min(60, batchSize * 3);
+
   try {
-    for (let step = 1; step <= config.maxSteps; step++) {
-      options.onProgress?.({ type: "model_start", step, maxSteps: config.maxSteps, message: "Thinking through the task and choosing the next action." });
+    for (let step = 1; step <= maxTotalSteps; step++) {
+      options.onProgress?.({ type: "model_start", step, maxSteps: maxTotalSteps, message: "Thinking through the task and choosing the next action." });
       const message = await chatCompletion(messages, toolDefinitions);
       const assistantMessage = {
         role: "assistant",
@@ -61,7 +67,7 @@ export async function runAgent(task, options = {}) {
 
       for (const call of calls) {
         const name = call.function?.name || "unknown_tool";
-        options.onProgress?.({ type: "tool_start", step, maxSteps: config.maxSteps, tool: name, message: `Using ${name.replace(/_/g, " ")}.` });
+        options.onProgress?.({ type: "tool_start", step, maxSteps: maxTotalSteps, tool: name, message: `Using ${name.replace(/_/g, " ")}.` });
         let args;
         try {
           args = JSON.parse(call.function?.arguments || "{}");
@@ -82,11 +88,26 @@ export async function runAgent(task, options = {}) {
           content: serialized.length > 20_000 ? serialized.slice(0, 20_000) + "\n[output truncated]" : serialized
         });
         await save();
-        options.onProgress?.({ type: "tool_done", step, maxSteps: config.maxSteps, tool: name, message: `Finished ${name.replace(/_/g, " ")}.` });
+        options.onProgress?.({ type: "tool_done", step, maxSteps: maxTotalSteps, tool: name, message: `Finished ${name.replace(/_/g, " ")}.` });
+      }
+
+      if (step % batchSize === 0 && step < maxTotalSteps) {
+        messages.push({
+          role: "user",
+          content: "Continue working on the original task from the current conversation and tool results. Do not repeat completed actions. Inspect the latest results, identify what remains, and keep using tools until the task is complete or you hit a genuine blocker. If it is already complete, provide the final result now."
+        });
+        record.continuationBatches = Math.floor(step / batchSize);
+        await save();
+        options.onProgress?.({
+          type: "continuation",
+          step,
+          maxSteps: maxTotalSteps,
+          message: `Continuing automatically after step ${step}; ${maxTotalSteps - step} model steps remain.`
+        });
       }
     }
 
-    const answer = `Stopped after ${config.maxSteps} model steps. The task checkpoint was saved; give a narrower follow-up task to continue.`;
+    const answer = `Stopped after ${maxTotalSteps} model steps across ${Math.ceil(maxTotalSteps / batchSize)} automatic batches. The task checkpoint was saved; send a follow-up to continue.`;
     record.status = "step_limit";
     record.answer = answer;
     record.finishedAt = new Date().toISOString();
