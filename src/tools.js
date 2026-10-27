@@ -8,9 +8,31 @@ import { requestPackageInstallApproval } from "./approvals.js";
 
 const MAX_OUTPUT = 30_000;
 let telegramPhotoSender = null;
+let telegramDocumentSender = null;
 
 export function registerTelegramPhotoSender(sender) {
   telegramPhotoSender = sender;
+}
+
+export function registerTelegramDocumentSender(sender) {
+  telegramDocumentSender = sender;
+}
+
+async function sendTelegramDocument(args) {
+  if (!telegramDocumentSender) throw new Error("Telegram document delivery is not initialized.");
+  const file = safePath(args.path);
+  const relative = path.relative(config.workspace, file);
+  const segments = relative.split(path.sep);
+  const base = path.basename(file).toLowerCase();
+  if (segments.some((part) => part === ".git" || part === ".agent-state") ||
+      /^\.env(?:\.|$)/i.test(base) ||
+      /^(id_rsa|id_ed25519|id_ecdsa|.*\.pem|.*\.key|credentials\.json|secrets?\.json)$/i.test(base)) {
+    throw new Error("This file looks like a secret or private key and cannot be sent through Telegram.");
+  }
+  const stat = await fs.stat(file);
+  if (!stat.isFile()) throw new Error("Path is not a file.");
+  if (stat.size > 45 * 1024 * 1024) throw new Error("File exceeds the 45 MB document-send safety limit.");
+  return await telegramDocumentSender({ filePath: file, caption: String(args.caption || "").slice(0, 900) });
 }
 
 async function sendTelegramPhoto(args) {
@@ -64,6 +86,7 @@ export const toolDefinitions = [
   { type: "function", function: { name: "browser_scroll", description: "Scroll the page by x/y pixels or scroll a selected element into view.", parameters: { type: "object", properties: { tab_id: { type: "string" }, selector: { type: "string" }, x: { type: "integer" }, y: { type: "integer" } }, required: ["tab_id"], additionalProperties: false } } },
   { type: "function", function: { name: "browser_screenshot", description: "Capture a screenshot of the current page and save it under workspace/browser-screenshots. Use this to preserve visual evidence.", parameters: { type: "object", properties: { tab_id: { type: "string" }, full_page: { type: "boolean" } }, required: ["tab_id"], additionalProperties: false } } },
   { type: "function", function: { name: "send_telegram_photo", description: "Send an existing PNG, JPEG, or WEBP image from the configured workspace to the configured Telegram owner as a photo. Use after browser_screenshot when the user asks you to send the screenshot/image. Provide the relative workspace path returned by the screenshot tool.", parameters: { type: "object", properties: { path: { type: "string" }, caption: { type: "string", maxLength: 900 } }, required: ["path"], additionalProperties: false } } },
+  { type: "function", function: { name: "send_telegram_document", description: "Send a file from the configured workspace to the configured Telegram owner as a downloadable document. Use when the owner asks to fetch, export, or send a generated/downloaded file in chat. Path must be relative to the workspace; secret files and private keys are blocked; maximum 45 MB.", parameters: { type: "object", properties: { path: { type: "string" }, caption: { type: "string", maxLength: 900 } }, required: ["path"], additionalProperties: false } } },
   { type: "function", function: { name: "browser_evaluate", description: "Run JavaScript in the current webpage context for DOM inspection or ordinary page interaction. This does not run in Node.js and cannot directly access the agent filesystem or environment. Never use it to defeat access controls or anti-abuse systems.", parameters: { type: "object", properties: { tab_id: { type: "string" }, script: { type: "string" } }, required: ["tab_id", "script"], additionalProperties: false } } },
 
   { type: "function", function: { name: "browser_wait", description: "Wait for a CSS selector, text, or page load state, or pause briefly for dynamic content. Prefer condition-based waits over fixed sleeps.", parameters: { type: "object", properties: { tab_id: { type: "string" }, selector: { type: "string" }, text: { type: "string" }, state: { type: "string", enum: ["visible", "hidden", "attached", "detached", "load", "domcontentloaded", "networkidle"] }, timeout_ms: { type: "integer", minimum: 500, maximum: 60000 }, wait_ms: { type: "integer", minimum: 0, maximum: 10000 } }, required: ["tab_id"], additionalProperties: false } } },
@@ -347,6 +370,7 @@ export async function executeTool(name, args) {
     case "run_check": return await runCheck(args);
     case "ask_user": return await requestUserChoice(args);
     case "send_telegram_photo": return await sendTelegramPhoto(args);
+    case "send_telegram_document": return await sendTelegramDocument(args);
     case "browser_open":
     case "browser_list_tabs":
     case "browser_snapshot":
