@@ -1,10 +1,12 @@
 import path from "node:path";
+import fs from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { config, validateConfig } from "./config.js";
 import { runAgent } from "./agent.js";
 import { listProfiles, loadProfile } from "./profiles.js";
 import { registerChoicePromptSender, resolveUserChoice } from "./interaction.js";
 import { initializePackageApprovals, registerPackageApprovalNotifier, decidePackageApproval } from "./approvals.js";
+import { registerTelegramPhotoSender } from "./tools.js";
 
 const API = () => `https://api.telegram.org/bot${config.telegramBotToken}`;
 const MAX_MESSAGE_LENGTH = 3900;
@@ -563,6 +565,30 @@ export async function startTelegramController() {
   console.log(`Telegram controller connected as @${me.username || me.id}`);
   console.log(`Authorized owner ID: ${config.telegramOwnerId}`);
   console.log("Send /start to the bot in Telegram. Press Ctrl+C to stop.");
+
+  registerTelegramPhotoSender(async ({ filePath, caption }) => {
+    const ext = path.extname(filePath).toLowerCase();
+    const mime = ({ ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp" })[ext];
+    if (!mime) throw new Error("Unsupported photo format.");
+    const bytes = await fs.readFile(filePath);
+    const form = new FormData();
+    form.append("chat_id", config.telegramOwnerId);
+    form.append("photo", new Blob([bytes], { type: mime }), path.basename(filePath));
+    if (caption) form.append("caption", caption);
+    let response;
+    try {
+      response = await fetch(`${API()}/sendPhoto`, { method: "POST", body: form, signal: AbortSignal.timeout(30_000) });
+    } catch (error) {
+      throw new Error(`Telegram sendPhoto network request failed: ${describeError(error)}`, { cause: error });
+    }
+    const raw = await response.text();
+    let data;
+    try { data = JSON.parse(raw); } catch {
+      throw new Error(`Telegram sendPhoto returned non-JSON (HTTP ${response.status}).`);
+    }
+    if (!response.ok || !data.ok) throw new Error(data.description || `Telegram sendPhoto failed (HTTP ${response.status}).`);
+    return { sent: true, chat_id: config.telegramOwnerId, photo_id: data.result?.photo?.at(-1)?.file_id || null };
+  });
 
   registerChoicePromptSender(async ({ id, prompt, choices }) => {
     const buttons = choices.map((choice, index) => ({
