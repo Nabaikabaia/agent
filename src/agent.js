@@ -235,8 +235,8 @@ export async function runAgent(task, options = {}) {
   // Repository-update requests are deterministic operations, not model-planning tasks.
   // Route them directly so the model cannot substitute unrelated tools or edit files first.
   if (isSelfUpdateRequest(task)) {
-    options.onProgress?.({ type: "model_start", step: 1, maxSteps: 1, message: "Running the GitHub updater directly." });
-    options.onProgress?.({ type: "tool_start", step: 1, maxSteps: 1, tool: "update_repository", message: "Using update repository." });
+    options.onProgress?.({ type: "model_start", step: 1, maxSteps: 1, message: "Preparing fast-forward-only Git pull from the configured GitHub origin." });
+    options.onProgress?.({ type: "tool_start", step: 1, maxSteps: 1, tool: "update_repository", message: "Checking repository state and origin before Git pull." });
     try {
       const result = await executeTool("update_repository", {});
       const answer = result?.updated
@@ -246,7 +246,7 @@ export async function runAgent(task, options = {}) {
       record.answer = answer;
       record.finishedAt = new Date().toISOString();
       await save();
-      options.onProgress?.({ type: "tool_done", step: 1, maxSteps: 1, tool: "update_repository", message: result?.updated ? "Repository update completed." : "Repository update was not confirmed." });
+      options.onProgress?.({ type: "tool_done", step: 1, maxSteps: 1, tool: "update_repository", message: result?.updated ? "Git pull completed: " + (result.output || result.currentCommit || "repository updated") : "Git pull returned without confirming an update." });
       return { answer, status: record.status, checkpoint, history: [...previousTurns, { role: "user", content: task.trim() }, { role: "assistant", content: answer }].slice(-20) };
     } catch (error) {
       const answer = `Repository update failed: ${error.message || "Unknown error"}`;
@@ -255,7 +255,7 @@ export async function runAgent(task, options = {}) {
       record.answer = answer;
       record.finishedAt = new Date().toISOString();
       await save();
-      options.onProgress?.({ type: "tool_done", step: 1, maxSteps: 1, tool: "update_repository", message: "Repository update failed." });
+      options.onProgress?.({ type: "tool_done", step: 1, maxSteps: 1, tool: "update_repository", message: "Git pull failed: " + (error.message || "unknown error") });
       return { answer, status: record.status, checkpoint, history: [...previousTurns, { role: "user", content: task.trim() }, { role: "assistant", content: answer }].slice(-20) };
     }
   }
