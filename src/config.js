@@ -27,7 +27,8 @@ export const config = {
   workspace,
   stateDir: path.resolve(".agent-state"),
   agentsDir: path.resolve(process.env.AGENT_PROFILES_DIR || "./agents"),
-  maxSteps: Math.min(20, Math.max(1, Number.parseInt(process.env.AGENT_MAX_STEPS || "8", 10) || 8))
+  maxSteps: Math.min(20, Math.max(1, Number.parseInt(process.env.AGENT_MAX_STEPS || "8", 10) || 8)),
+  aiRequestTimeoutMs: Math.min(600_000, Math.max(30_000, Number.parseInt(process.env.AI_REQUEST_TIMEOUT_MS || "300000", 10) || 300_000))
 };
 
 export function validateConfig() {
