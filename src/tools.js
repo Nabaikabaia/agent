@@ -48,6 +48,7 @@ export const toolDefinitions = [
   { type: "function", function: { name: "web_search", description: "Search the public web for current information. Returns result titles, URLs and snippets.", parameters: { type: "object", properties: { query: { type: "string", minLength: 2 } }, required: ["query"], additionalProperties: false } } },
   { type: "function", function: { name: "browse_url", description: "Fetch and extract readable text from a public HTTP(S) page, including documentation pages. Use web_search to discover URLs first.", parameters: { type: "object", properties: { url: { type: "string" } }, required: ["url"], additionalProperties: false } } },
   { type: "function", function: { name: "github_api", description: "Read public GitHub repository metadata, files, commits, issues, pull requests, releases, and search results using the GitHub REST API. A configured GITHUB_TOKEN enables higher limits/private repositories. Use API paths such as /repos/owner/repo, /repos/owner/repo/contents/src, /repos/owner/repo/issues, /repos/owner/repo/pulls, /repos/owner/repo/commits, /repos/owner/repo/releases, /search/repositories?q=... or /search/code?q=... .", parameters: { type: "object", properties: { path: { type: "string" } }, required: ["path"], additionalProperties: false } } },
+  { type: "function", function: { name: "update_repository", description: "Update the current agent checkout from its private or public GitHub origin using GITHUB_TOKEN from .env. Only supports the Nabaikabaia/agent HTTPS origin, requires a clean working tree, and performs a fast-forward-only pull of the current branch. Use only when the owner asks to update/pull the agent.", parameters: { type: "object", properties: {}, additionalProperties: false } } },
   { type: "function", function: { name: "install_package", description: "Request owner approval in Telegram, then install a project dependency in the configured workspace using npm, pnpm, yarn, or bun. Choose dev=true for development-only packages. Do not install global packages. Direct package-install commands through run_command are blocked.", parameters: { type: "object", properties: { package: { type: "string", minLength: 1 }, manager: { type: "string", enum: ["npm", "pnpm", "yarn", "bun"] }, dev: { type: "boolean" } }, required: ["package", "manager"], additionalProperties: false } } },
   { type: "function", function: { name: "run_command", description: "Run a command in the configured workspace for development, tests, builds, Git inspection, or project setup. Provide the executable and arguments as a single command string; shell operators, pipes, and redirections are not supported. Commands run without agent API credentials and are time/output limited. Inspect project scripts before running them.", parameters: { type: "object", properties: { command: { type: "string", minLength: 1 }, timeout_seconds: { type: "integer", minimum: 1, maximum: 300 } }, required: ["command"], additionalProperties: false } } },
   { type: "function", function: { name: "run_check", description: "Compatibility tool for common project checks and read-only Git inspection.", parameters: { type: "object", properties: { command: { type: "string", enum: ["npm run check", "npm test", "npm run test", "npm run build", "git status --short", "git diff --", "git log -5 --oneline"] } }, required: ["command"], additionalProperties: false } } },
@@ -241,6 +242,68 @@ async function runCommand(command, timeoutSeconds = 120, allowPackageInstall = f
   });
 }
 
+async function updateRepository() {
+  const token = config.githubToken;
+  if (!token) throw new Error("GITHUB_TOKEN is not configured. Add a fine-grained token with Contents: Read access for Nabaikabaia/agent to .env.");
+
+  const baseEnv = { PATH: process.env.PATH || "", CI: "1", GIT_TERMINAL_PROMPT: "0" };
+  for (const key of ["HOME", "TMPDIR", "TEMP", "TMP", "SYSTEMROOT", "WINDIR", "LANG", "LC_ALL"]) {
+    if (process.env[key]) baseEnv[key] = process.env[key];
+  }
+
+  const git = (args, extraEnv = {}) => new Promise((resolve, reject) => {
+    const child = spawn("git", args, {
+      cwd: config.workspace,
+      env: { ...baseEnv, ...extraEnv },
+      shell: false,
+      stdio: ["ignore", "pipe", "pipe"]
+    });
+    let stdout = "", stderr = "";
+    child.stdout.on("data", chunk => { if (stdout.length < 12_000) stdout += chunk.toString().slice(0, 12_000 - stdout.length); });
+    child.stderr.on("data", chunk => { if (stderr.length < 12_000) stderr += chunk.toString().slice(0, 12_000 - stderr.length); });
+    child.on("error", reject);
+    child.on("close", (code, signal) => resolve({ code, signal, stdout, stderr }));
+  });
+
+  const remoteResult = await git(["remote", "get-url", "origin"]);
+  if (remoteResult.code !== 0) throw new Error("Could not read the Git origin. Ensure the workspace is a clone of Nabaikabaia/agent.");
+  const remote = remoteResult.stdout.trim();
+  let remoteUrl;
+  try { remoteUrl = new URL(remote); } catch { throw new Error("Origin must be an HTTPS GitHub URL, not an SSH or local remote."); }
+  const repoPath = remoteUrl.pathname.replace(/\\.git$/, "").replace(/\\/$/, "").toLowerCase();
+  if (remoteUrl.protocol !== "https:" || remoteUrl.hostname.toLowerCase() !== "github.com" ||
+      remoteUrl.username || remoteUrl.password || repoPath !== "/nabaikabaia/agent") {
+    throw new Error("For safety, update_repository only supports https://github.com/Nabaikabaia/agent(.git) as origin.");
+  }
+
+  const status = await git(["status", "--porcelain"]);
+  if (status.code !== 0) throw new Error("Could not inspect the Git working tree.");
+  if (status.stdout.trim()) throw new Error("Update stopped because the workspace has uncommitted changes. Commit or safely back them up before updating.");
+
+  const branchResult = await git(["branch", "--show-current"]);
+  const branch = branchResult.stdout.trim();
+  if (branchResult.code !== 0 || !branch || branch.startsWith("-")) throw new Error("Could not determine the current branch.");
+  const auth = Buffer.from(`x-access-token:${token}`, "utf8").toString("base64");
+  const authEnv = {
+    GIT_CONFIG_COUNT: "1",
+    GIT_CONFIG_KEY_0: "http.https://github.com/.extraheader",
+    GIT_CONFIG_VALUE_0: `AUTHORIZATION: basic ${auth}`
+  };
+  const pulled = await git(["pull", "--ff-only", "origin", branch], authEnv);
+  const clean = (value) => String(value || "").replaceAll(token, "[REDACTED]");
+  if (pulled.code !== 0) {
+    throw new Error(`Private GitHub update failed (exit ${pulled.code}): ${clean(pulled.stderr || pulled.stdout).slice(0, 3000)}`);
+  }
+  const head = await git(["log", "-1", "--format=%h %s"]);
+  return {
+    updated: true,
+    branch,
+    origin: "https://github.com/Nabaikabaia/agent.git",
+    output: clean(pulled.stdout).trim().slice(0, 3000),
+    currentCommit: clean(head.stdout).trim()
+  };
+}
+
 async function installPackage(args) {
   const manager = args.manager;
   const pkg = String(args.package || "").trim();
@@ -278,6 +341,7 @@ export async function executeTool(name, args) {
     case "web_search": return await webSearch(args);
     case "browse_url": return await browseUrl(args);
     case "github_api": return await githubApi(args);
+    case "update_repository": return await updateRepository();
     case "install_package": return await installPackage(args);
     case "run_command": return await runCommand(args.command, args.timeout_seconds);
     case "run_check": return await runCheck(args);
