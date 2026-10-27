@@ -34,8 +34,8 @@ async function getFreeToolModelIds() {
 
   const available = new Set();
   try {
-    const response = await fetch(\`\${config.baseUrl}/models\`, {
-      headers: { Authorization: \`Bearer \${config.apiKey}\` },
+    const response = await fetch(`${config.baseUrl}/models`, {
+      headers: { Authorization: `Bearer ${config.apiKey}` },
       signal: AbortSignal.timeout(10_000)
     });
     if (response.ok) {
@@ -72,10 +72,10 @@ async function getFreeToolModelIds() {
 async function requestModel(model, messages, tools) {
   let response;
   try {
-    response = await fetch(\`\${config.baseUrl}/chat/completions\`, {
+    response = await fetch(`${config.baseUrl}/chat/completions`, {
       method: "POST",
       headers: {
-        "Authorization": \`Bearer \${config.apiKey}\`,
+        "Authorization": `Bearer ${config.apiKey}`,
         "Content-Type": "application/json"
       },
       body: JSON.stringify({
@@ -93,7 +93,7 @@ async function requestModel(model, messages, tools) {
       model,
       status: 0,
       error: new Error(timeout
-        ? \`Request timed out after \${Math.round(config.aiRequestTimeoutMs / 1000)} seconds.\`
+        ? `Request timed out after ${Math.round(config.aiRequestTimeoutMs / 1000)} seconds.`
         : (error.message || "Network request failed."))
     };
   }
@@ -106,7 +106,7 @@ async function requestModel(model, messages, tools) {
     return {
       model,
       status: response.status,
-      error: new Error(\`Provider returned non-JSON (HTTP \${response.status}).\`)
+      error: new Error(`Provider returned non-JSON (HTTP ${response.status}).`)
     };
   }
 
@@ -114,7 +114,7 @@ async function requestModel(model, messages, tools) {
     return {
       model,
       status: response.status,
-      error: new Error(data?.error?.message || data?.message || \`HTTP \${response.status}\`)
+      error: new Error(data?.error?.message || data?.message || `HTTP ${response.status}`)
     };
   }
 
@@ -145,35 +145,35 @@ export async function chatCompletion(messages, tools) {
   // Model discovery and :free failover are OpenRouter-specific. Never send
   // OpenRouter model IDs to another provider after its request fails.
   if (provider !== "openrouter") {
-    throw new Error(\`AI provider API error from \${provider} (\${primary}): \${firstError}\`);
+    throw new Error(`AI provider API error from ${provider} (${primary}): ${firstError}`);
   }
 
   if (!isRetryable(first.status, firstError)) {
-    throw new Error(\`AI provider API error from \${primary}: \${firstError}\`);
+    throw new Error(`AI provider API error from ${primary}: ${firstError}`);
   }
 
   const discovered = await getFreeToolModelIds();
   const fallbacks = discovered.filter((id) => id !== primary).slice(0, 5);
 
   if (!fallbacks.length) {
-    throw new Error(\`AI model \${primary} failed: \${firstError}. No alternate free tool-capable models were discovered.\`);
+    throw new Error(`AI model ${primary} failed: ${firstError}. No alternate free tool-capable models were discovered.`);
   }
 
-  const failures = [\`\${primary}: \${firstError}\`];
-  console.warn(\`[OpenRouter] Model \${primary} failed; trying up to \${fallbacks.length} free tool-capable fallback model(s).\`);
+  const failures = [`${primary}: ${firstError}`];
+  console.warn(`[OpenRouter] Model ${primary} failed; trying up to ${fallbacks.length} free tool-capable fallback model(s).`);
 
   for (const model of fallbacks) {
     const result = await requestModel(model, messages, tools);
     if (result.message) {
-      console.warn(\`[OpenRouter] Fallback succeeded with model \${model}.\`);
+      console.warn(`[OpenRouter] Fallback succeeded with model ${model}.`);
       return result.message;
     }
 
     const message = result.error?.message || "Unknown provider error";
     if (isDailyFreeQuotaError(message)) throw new Error(quotaMessage());
 
-    failures.push(\`\${model}: \${message}\`);
+    failures.push(`${model}: ${message}`);
   }
 
-  throw new Error(\`All attempted OpenRouter models failed. \${failures.join(" | ")}\`);
+  throw new Error(`All attempted OpenRouter models failed. ${failures.join(" | ")}`);
 }
