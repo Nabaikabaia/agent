@@ -492,26 +492,26 @@ async function createFollowupButtons(task, answer) {
   try {
     const prompt = [
       "You are choosing optional next-step buttons for a Telegram coding and productivity agent.",
-      "Return ONLY valid JSON in this exact shape: {\\"choices\\":[\\"short action\\"]}.",
+      'Return ONLY valid JSON in this exact shape: {"choices":["short action"]}.',
       "Suggest 0 to 3 concise, specific actions that logically follow from the completed task and its actual result.",
       "Do not suggest work already completed. Do not offer generic choices just to fill space.",
       "Suggest report/PDF/ZIP only when the result or task would benefit from that format.",
       "Suggest PM2/server execution only when the task clearly concerns a runnable service or deployment.",
       "Never imply a sensitive action is already approved; any selected action must still go through existing approval checks.",
-      "If there is no useful next step, return {\\"choices\\":[]}.",
-      "Original task:\\n" + taskText,
-      "Completed result:\\n" + resultText
-    ].join("\\n\\n");
+      'If there is no useful next step, return {"choices":[]}.',
+      "Original task:\n" + taskText,
+      "Completed result:\n" + resultText
+    ].join("\n\n");
     const generated = await Promise.race([
       replyWithGpt5(prompt, []),
       new Promise((_, reject) => setTimeout(() => reject(new Error("follow-up suggestion timeout")), 8000))
     ]);
-    const jsonText = String(generated || "").replace(/^\`\`\`(?:json)?\\s*/i, "").replace(/\`\`\`\\s*$/, "").trim();
+    const jsonText = String(generated || "").replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/, "").trim();
     const parsed = JSON.parse(jsonText);
     if (Array.isArray(parsed.choices)) {
       choices = parsed.choices
         .filter((item) => typeof item === "string")
-        .map((item) => item.trim().replace(/[\\r\\n]+/g, " "))
+        .map((item) => item.trim().replace(/[\r\n]+/g, " "))
         .filter((item) => item.length >= 4 && item.length <= 48)
         .filter((item) => !/^(?:finish|done|no thanks|skip)$/i.test(item))
         .slice(0, 3);
