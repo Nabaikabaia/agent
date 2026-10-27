@@ -232,10 +232,29 @@ function legacyKeyboard(buttons) {
   return rows.length ? { inline_keyboard: rows } : undefined;
 }
 
+function richButtonsHtml(buttons = []) {
+  if (!buttons.length) return "";
+  const rows = [];
+  const regular = buttons.filter((button) => !button.separate).slice(0, 8);
+  if (regular.length) rows.push(regular);
+  for (const button of buttons.filter((item) => item.separate).slice(0, 20)) rows.push([button]);
+
+  return rows.map((row) => "<tg-button-row align=\"left\">" + row.map((button) => {
+    const label = escapeHtml(String(button.text || "Continue").slice(0, 64));
+    if (button.url && /^https?:\/\//i.test(button.url)) {
+      const style = ["primary", "secondary", "success", "danger", "link"].includes(button.style) ? " style=\"" + button.style + "\"" : "";
+      return "<tg-button type=\"url\"" + style + " url=\"" + escapeHtml(button.url) + "\">" + label + "</tg-button>";
+    }
+    const style = ["primary", "secondary", "success", "danger", "link"].includes(button.style) ? " style=\"" + button.style + "\"" : "";
+    return "<tg-button type=\"callback_data\"" + style + " data=\"" + escapeHtml(String(button.data || "").slice(0, 64)) + "\">" + label + "</tg-button>";
+  }).join("") + "</tg-button-row>").join("\n");
+}
+
 async function sendRich(chatId, text, buttons = [], options = {}) {
+  const html = markdownToHtml(text) + richButtonsHtml(buttons);
   const payload = {
     chat_id: chatId,
-    rich_message: richContent(text, buttons),
+    rich_message: { html: String(html || "&nbsp;").slice(0, 28000) },
     ...(options.ephemeralMessageParameters
       ? { ephemeral_message_parameters: options.ephemeralMessageParameters }
       : {}),
@@ -248,15 +267,13 @@ async function sendRich(chatId, text, buttons = [], options = {}) {
       /method not found|unknown method|unsupported method|not found|http 404/i.test(error?.telegramDescription || error?.message || "");
     if (!canFallback) throw error;
 
-    // If this Bot API server rejects Rich Messages for any reason, retry as a standard message.
+    // Never fall back to ordinary inline keyboards: preserve the user's rich-button requirement.
     const ephemeral = options.ephemeralMessageParameters;
     const fallbackChatId = ephemeral?.receiver_user_id ?? chatId;
-    const fallbackPayload = {
+    return await telegram("sendMessage", {
       chat_id: fallbackChatId,
-      text: plainFallbackText(text),
-      ...(legacyKeyboard(buttons) ? { reply_markup: legacyKeyboard(buttons) } : {})
-    };
-    return await telegram("sendMessage", fallbackPayload);
+      text: plainFallbackText(text)
+    });
   }
 }
 
