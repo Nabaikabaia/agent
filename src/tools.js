@@ -50,7 +50,7 @@ const DEFAULT_TIMEOUT_MS = 120_000;
 const COMMANDS = new Set([
   "node", "npm", "npx", "pnpm", "yarn", "bun", "git", "python", "python3", "pip", "pip3",
   "pytest", "ruff", "uv", "cargo", "rustc", "go", "make", "cmake", "gcc", "g++",
-  "java", "javac", "gradle", "mvn", "curl", "tar", "unzip", "zip", "ls", "cat", "head",
+  "java", "javac", "gradle", "mvn", "pm2", "curl", "tar", "unzip", "zip", "ls", "cat", "head",
   "tail", "find", "grep", "rg", "sed", "awk", "wc", "which", "pwd", "env", "printenv"
 ]);
 const DENIED_COMMANDS = new Set(["sudo", "su", "shutdown", "reboot", "mkfs", "dd", "mount", "umount", "passwd", "useradd", "userdel", "iptables", "systemctl"]);
@@ -66,7 +66,8 @@ const DENIED_PATTERNS = [
 export const toolDefinitions = [
   { type: "function", function: { name: "list_files", description: "List files and directories under the configured workspace.", parameters: { type: "object", properties: { path: { type: "string" } }, additionalProperties: false } } },
   { type: "function", function: { name: "read_file", description: "Read a UTF-8 text file inside the configured workspace.", parameters: { type: "object", properties: { path: { type: "string" } }, required: ["path"], additionalProperties: false } } },
-  { type: "function", function: { name: "write_file", description: "Create or replace a UTF-8 text file inside the workspace. Never write secrets.", parameters: { type: "object", properties: { path: { type: "string" }, content: { type: "string" } }, required: ["path", "content"], additionalProperties: false } } },
+  { type: "function", function: { name: "write_file", description: "Create a UTF-8 text file inside the workspace. Replacing an existing file requires explicit owner approval through Telegram buttons. Sensitive files and secret paths are blocked.", parameters: { type: "object", properties: { path: { type: "string" }, content: { type: "string" } }, required: ["path", "content"], additionalProperties: false } } },
+  { type: "function", function: { name: "delete_file", description: "Delete one regular file inside the configured workspace. Always request and wait for explicit owner approval through Telegram buttons before deleting. Directories, secrets, .git, and agent state are protected.", parameters: { type: "object", properties: { path: { type: "string" } }, required: ["path"], additionalProperties: false } } },
   { type: "function", function: { name: "web_search", description: "Search the public web for current information. Returns result titles, URLs and snippets.", parameters: { type: "object", properties: { query: { type: "string", minLength: 2 } }, required: ["query"], additionalProperties: false } } },
   { type: "function", function: { name: "browse_url", description: "Fetch and extract readable text from a public HTTP(S) page, including documentation pages. Use web_search to discover URLs first.", parameters: { type: "object", properties: { url: { type: "string" } }, required: ["url"], additionalProperties: false } } },
   { type: "function", function: { name: "github_api", description: "Read public GitHub repository metadata, files, commits, issues, pull requests, releases, and search results using the GitHub REST API. A configured GITHUB_TOKEN enables higher limits/private repositories. Use API paths such as /repos/owner/repo, /repos/owner/repo/contents/src, /repos/owner/repo/issues, /repos/owner/repo/pulls, /repos/owner/repo/commits, /repos/owner/repo/releases, /search/repositories?q=... or /search/code?q=... .", parameters: { type: "object", properties: { path: { type: "string" } }, required: ["path"], additionalProperties: false } } },
@@ -119,13 +120,63 @@ async function readFile(args) {
   return await fs.readFile(file, "utf8");
 }
 
+function assertNonSensitivePath(file) {
+  const relative = path.relative(config.workspace, file);
+  const segments = relative.split(path.sep);
+  const base = path.basename(file).toLowerCase();
+  if (
+    segments.some((part) => part === ".git" || part === ".agent-state") ||
+    /^\.env(?:\.|$)/i.test(base) ||
+    /^(?:id_rsa|id_ed25519|id_ecdsa|credentials?(?:\..*)?|secrets?(?:\..*)?|.*\.(?:pem|key|p12|pfx))$/i.test(base)
+  ) {
+    throw new Error("This path may contain credentials or protected agent state and cannot be modified by this tool.");
+  }
+  return relative;
+}
+
 async function writeFile(args) {
   if (typeof args.content !== "string") throw new Error("content must be a string.");
   if (Buffer.byteLength(args.content, "utf8") > 200_000) throw new Error("File exceeds the 200 KB write limit.");
   const file = safePath(args.path);
+  const relative = assertNonSensitivePath(file);
+  let existing = false;
+  try {
+    const stat = await fs.lstat(file);
+    if (!stat.isFile()) throw new Error("Only regular files can be replaced.");
+    existing = true;
+  } catch (error) {
+    if (error.code !== "ENOENT") throw error;
+  }
+  if (existing) {
+    const choice = await requestUserChoice({
+      prompt: "The agent is about to replace the existing file " + relative + ". This will overwrite its current contents. May I proceed?",
+      choices: ["Approve overwrite", "Cancel"],
+      timeout_seconds: 300
+    });
+    if (choice.timed_out || choice.selected !== "Approve overwrite") {
+      return { written: false, approval: choice.timed_out ? "expired" : "rejected", path: relative, message: "The existing file was left unchanged." };
+    }
+  }
   await fs.mkdir(path.dirname(file), { recursive: true });
   await fs.writeFile(file, args.content, { encoding: "utf8", mode: 0o600 });
-  return { written: path.relative(config.workspace, file), bytes: Buffer.byteLength(args.content, "utf8") };
+  return { written: relative, bytes: Buffer.byteLength(args.content, "utf8"), replaced_existing_file: existing };
+}
+
+async function deleteFile(args) {
+  const file = safePath(args.path);
+  const relative = assertNonSensitivePath(file);
+  const stat = await fs.lstat(file);
+  if (!stat.isFile()) throw new Error("For safety, delete_file only removes a single regular file, not a directory or symbolic link.");
+  const choice = await requestUserChoice({
+    prompt: "The agent requests permission to permanently delete this file: " + relative + ". This cannot be undone by the agent. Proceed?",
+    choices: ["Approve deletion", "Cancel"],
+    timeout_seconds: 300
+  });
+  if (choice.timed_out || choice.selected !== "Approve deletion") {
+    return { deleted: false, approval: choice.timed_out ? "expired" : "rejected", path: relative, message: "No file was deleted." };
+  }
+  await fs.unlink(file);
+  return { deleted: true, path: relative };
 }
 
 function cleanHtml(html) {
@@ -241,6 +292,17 @@ async function runCommand(command, timeoutSeconds = 120, allowPackageInstall = f
   if (typeof command !== "string" || command.length > 2000) throw new Error("Command must be a string under 2000 characters.");
   const args = splitArgs(command);
   const executable = validateCommand(args, command, allowPackageInstall);
+  if (executable === "pm2" && /^(restart|stop|delete|reload|resurrect)$/.test(String(args[1] || "").toLowerCase())) {
+    const operation = args.slice(1).join(" ");
+    const choice = await requestUserChoice({
+      prompt: "The agent requests permission to run the server process operation: pm2 " + operation + ". This may interrupt running services. Proceed?",
+      choices: ["Approve operation", "Cancel"],
+      timeout_seconds: 300
+    });
+    if (choice.timed_out || choice.selected !== "Approve operation") {
+      return { command, executable, executed: false, approval: choice.timed_out ? "expired" : "rejected", message: "The server operation was not run." };
+    }
+  }
   await fs.mkdir(config.workspace, { recursive: true });
   const timeoutMs = Math.min(300, Math.max(1, Number(timeoutSeconds) || 120)) * 1000;
   return await new Promise((resolve, reject) => {
@@ -361,6 +423,7 @@ export async function executeTool(name, args) {
     case "list_files": return await listFiles(args);
     case "read_file": return await readFile(args);
     case "write_file": return await writeFile(args);
+    case "delete_file": return await deleteFile(args);
     case "web_search": return await webSearch(args);
     case "browse_url": return await browseUrl(args);
     case "github_api": return await githubApi(args);
