@@ -270,7 +270,7 @@ async function updateRepository() {
   const remote = remoteResult.stdout.trim();
   let remoteUrl;
   try { remoteUrl = new URL(remote); } catch { throw new Error("Origin must be an HTTPS GitHub URL, not an SSH or local remote."); }
-  const repoPath = remoteUrl.pathname.replace(/\\.git$/, "").replace(/\\/$/, "").toLowerCase();
+  const repoPath = remoteUrl.pathname.replace(/\.git$/, "").replace(/\/$/, "").toLowerCase();
   if (remoteUrl.protocol !== "https:" || remoteUrl.hostname.toLowerCase() !== "github.com" ||
       remoteUrl.username || remoteUrl.password || repoPath !== "/nabaikabaia/agent") {
     throw new Error("For safety, update_repository only supports https://github.com/Nabaikabaia/agent(.git) as origin.");
