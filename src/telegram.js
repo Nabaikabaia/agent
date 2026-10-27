@@ -259,12 +259,37 @@ async function sendRich(chatId, text, buttons = [], options = {}) {
   }
 }
 
-async function sendRichDraft(chatId, draftId, text) {
-  return telegram("sendRichMessageDraft", {
-    chat_id: chatId,
-    draft_id: draftId,
-    rich_message: richContent(text)
-  });
+function escapeHtml(value) {
+  return String(value ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
+function progressMessage(task, profile, events, state = "working") {
+  const title = state === "working" ? "⏳ <b>Nabees Agent is working</b>" : state === "done" ? "✅ <b>Task completed</b>" : "⚠️ <b>Task stopped</b>";
+  const lines = events.slice(-8).map((event) => `• ${escapeHtml(event)}`).join("\n");
+  const details = [`<b>Profile:</b> ${escapeHtml(profile)}`, `<b>Task:</b> ${escapeHtml(String(task).slice(0, 500))}`, "", "<b>Progress</b>", lines || "Starting…"].join("\n");
+  return `${title}\n<blockquote expandable>${details}</blockquote>`;
+}
+
+async function sendProgressMessage(chatId, text) {
+  try {
+    return await telegram("sendMessage", { chat_id: chatId, text, parse_mode: "HTML" });
+  } catch (error) {
+    // Older Telegram clients/API servers may not support expandable blockquotes.
+    if (!/parse entities|unsupported start tag|can't parse/i.test(error?.message || "")) throw error;
+    return telegram("sendMessage", { chat_id: chatId, text: text.replace("<blockquote expandable>", "<blockquote>").replace("</blockquote>", "</blockquote>"), parse_mode: "HTML" });
+  }
+}
+
+async function editProgressMessage(chatId, messageId, text) {
+  try {
+    return await telegram("editMessageText", { chat_id: chatId, message_id: messageId, text, parse_mode: "HTML" });
+  } catch (error) {
+    if (/message is not modified/i.test(error?.message || "")) return null;
+    if (/parse entities|unsupported start tag|can't parse/i.test(error?.message || "")) {
+      return telegram("editMessageText", { chat_id: chatId, message_id: messageId, text: text.replace("<blockquote expandable>", "<blockquote>"), parse_mode: "HTML" });
+    }
+    throw error;
+  }
 }
 
 async function sendText(chatId, text, replyToMessageId) {
@@ -542,36 +567,55 @@ async function handleMessage(message) {
   }
 
   activeTask = { task, profile: selectedProfile, startedAt: new Date().toISOString() };
-  const draftId = Math.max(1, Date.now() % 2147483647);
-  const progressDraft = `**Task received**\n\nProfile: ${selectedProfile}\nWorking on it now.\n\n${task.slice(0, 700)}`;
-  let draftTimer = null;
-  try {
-    // Keep transient progress in Telegram's live rich-draft UI, not as a permanent chat message.
+  const progressEvents = ["Task received.", "Preparing the agent and loading its profile."];
+  let progressMessageId = null;
+  let progressTimer = null;
+  let progressEditBusy = false;
+  const refreshProgress = async (state = "working") => {
+    if (progressEditBusy) return;
+    progressEditBusy = true;
     try {
-      await sendRichDraft(chatId, draftId, progressDraft);
-      draftTimer = setInterval(() => {
-        void sendRichDraft(chatId, draftId, progressDraft).catch((error) => {
-          console.warn("Telegram draft refresh failed:", describeError(error));
-        });
-      }, 12_000);
+      const text = progressMessage(task, activeTask?.profile || selectedProfile, progressEvents, state);
+      if (progressMessageId) await editProgressMessage(chatId, progressMessageId, text);
+      else {
+        const sent = await sendProgressMessage(chatId, text);
+        progressMessageId = sent?.message_id || null;
+      }
     } catch (error) {
-      // Draft support may vary by Bot API server. Never turn this status into a real message.
-      console.warn("Telegram rich drafts unavailable; continuing without a progress preview:", describeError(error));
+      console.warn("Telegram progress message update failed:", describeError(error));
+    } finally {
+      progressEditBusy = false;
     }
-
-    const result = await runAgent(task, { profile: activeTask.profile, history: conversationHistory });
+  };
+  try {
+    await refreshProgress();
+    progressTimer = setInterval(() => { void refreshProgress(); }, 4_000);
+    const result = await runAgent(task, {
+      profile: activeTask.profile,
+      history: conversationHistory,
+      onProgress: (event) => {
+        if (event.type === "model_start") progressEvents.push(`Step ${event.step}/${event.maxSteps}: reasoning and selecting the next action.`);
+        else if (event.type === "tool_start") progressEvents.push(`Step ${event.step}/${event.maxSteps}: ${event.message}`);
+        else if (event.type === "tool_done") progressEvents.push(event.message);
+        if (progressEvents.length > 20) progressEvents.splice(0, progressEvents.length - 20);
+      }
+    });
     if (Array.isArray(result.history)) conversationHistory = result.history;
-    if (draftTimer) clearInterval(draftTimer);
-    draftTimer = null;
+    if (progressTimer) clearInterval(progressTimer);
+    progressTimer = null;
+    progressEvents.push("Task completed successfully.");
+    await refreshProgress("done");
     await sendRich(chatId, `**Task finished**\n\n${result.answer}\n\n---\nCheckpoint: ${result.checkpoint}`, menuButtons());
   } catch (error) {
     console.error("Agent task execution failed:", describeError(error));
     if (error?.stack) console.error(error.stack);
-    if (draftTimer) clearInterval(draftTimer);
-    draftTimer = null;
+    if (progressTimer) clearInterval(progressTimer);
+    progressTimer = null;
+    progressEvents.push(`Stopped: ${error.message || "Unknown error"}`);
+    await refreshProgress("failed");
     await sendRich(chatId, `**Task failed**\n\n${error.message || "Unknown error"}`, menuButtons());
   } finally {
-    if (draftTimer) clearInterval(draftTimer);
+    if (progressTimer) clearInterval(progressTimer);
     activeTask = null;
   }
 }
