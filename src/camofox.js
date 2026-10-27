@@ -148,7 +148,7 @@ export async function executeCamofoxTool(name, args) {
 
   if (name === "browser_close") {
     const id = remoteId(args.tab_id);
-    const data = await request("DELETE", `/tabs/${encodeURIComponent(id)}`);
+    const data = await request("DELETE", `/tabs/${encodeURIComponent(id)}?userId=${encodeURIComponent(userId)}`);
     tabs.delete(String(args.tab_id));
     return { closed: args.tab_id, details: data, browser: "camofox" };
   }
@@ -165,7 +165,10 @@ export async function executeCamofoxTool(name, args) {
 
   if (name === "browser_screenshot") {
     const id = remoteId(args.tab_id);
-    const image = await request("GET", `/tabs/${encodeURIComponent(id)}/screenshot?userId=${encodeURIComponent(userId)}`, undefined, { binary: true });
+    const result = await request("GET", `/tabs/${encodeURIComponent(id)}/screenshot?userId=${encodeURIComponent(userId)}`);
+    const encoded = result?.screenshot?.data || result?.screenshot || result?.data || result?.base64;
+    if (typeof encoded !== "string") throw new Error("Camofox screenshot response did not contain base64 image data.");
+    const image = Buffer.from(encoded.replace(/^data:image\\/png;base64,/, ""), "base64");
     if (image.length < 8 || image.subarray(0, 8).toString("hex") !== "89504e470d0a1a0a") {
       throw new Error("Camofox screenshot response was not a valid PNG image.");
     }
@@ -190,8 +193,47 @@ export async function executeCamofoxTool(name, args) {
     return results;
   }
 
-  if (name === "browser_select" || name === "browser_evaluate" || name === "browser_upload") {
-    throw new Error(`${name} is not supported by the current Camofox API adapter. Use the standard Playwright backend for this operation.`);
+  if (name === "browser_evaluate") {
+    const id = remoteId(args.tab_id);
+    const data = await request("POST", `/tabs/${encodeURIComponent(id)}/evaluate`, { userId, expression: args.script });
+    return tabResult(args.tab_id, { result: data.result, browser: "camofox", details: data });
+  }
+
+  if (name === "browser_select") {
+    const id = remoteId(args.tab_id);
+    const selector = String(args.selector || "");
+    if (!selector) throw new Error("Camofox select requires a CSS selector for the select element.");
+    const values = Array.isArray(args.values) ? args.values : [args.values];
+    const expression = '(() => { const el = document.querySelector(' + JSON.stringify(selector) + '); if (!el || el.tagName !== "SELECT") throw new Error("Select element not found"); const wanted = ' + JSON.stringify(values.map(String)) + '; for (const option of el.options) option.selected = wanted.includes(option.value); el.dispatchEvent(new Event("input", {bubbles:true})); el.dispatchEvent(new Event("change", {bubbles:true})); return {value:el.value, selected:[...el.selectedOptions].map(o=>o.value)}; })()';
+    const data = await request("POST", `/tabs/${encodeURIComponent(id)}/evaluate`, { userId, expression });
+    return tabResult(args.tab_id, { selection: data.result, browser: "camofox" });
+  }
+
+  if (name === "browser_upload") {
+    const id = remoteId(args.tab_id);
+    const absolute = path.resolve(config.workspace, String(args.path || ""));
+    const relative = path.relative(config.workspace, absolute);
+    if (!args.path || relative.startsWith("..") || path.isAbsolute(relative)) throw new Error("Upload path must stay inside the configured agent workspace.");
+    const stat = await fs.stat(absolute);
+    if (!stat.isFile()) throw new Error("Upload path must be a regular file.");
+    const data = await request("POST", `/tabs/${encodeURIComponent(id)}/upload`, { userId, path: absolute, ...(args.selector ? { selector: args.selector } : {}) });
+    return tabResult(args.tab_id, { uploaded: path.basename(absolute), details: data, browser: "camofox" });
+  }
+
+  if (name === "browser_forward" || name === "browser_refresh") {
+    const id = remoteId(args.tab_id);
+    const action = name === "browser_forward" ? "forward" : "refresh";
+    const data = await request("POST", `/tabs/${encodeURIComponent(id)}/${action}`, { userId });
+    const tab = tabs.get(String(args.tab_id));
+    if (data.url) tab.url = data.url;
+    return tabResult(args.tab_id, { action, details: data, browser: "camofox" });
+  }
+
+  if (name === "browser_links" || name === "browser_images") {
+    const id = remoteId(args.tab_id);
+    const resource = name === "browser_links" ? "links" : "images";
+    const data = await request("GET", `/tabs/${encodeURIComponent(id)}/${resource}?userId=${encodeURIComponent(userId)}`);
+    return tabResult(args.tab_id, { [resource]: data[resource] || data, browser: "camofox" });
   }
 
   throw new Error(`Unknown Camofox browser tool: ${name}`);
