@@ -15,6 +15,7 @@ let activeTask = null;
 let selectedProfile = "general";
 let conversationHistory = [];
 let stopping = false;
+const pendingFollowups = new Map();
 
 function describeError(error) {
   const parts = [error?.message || String(error)];
@@ -263,11 +264,70 @@ function escapeHtml(value) {
   return String(value ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
 
-function progressMessage(task, profile, events, state = "working") {
-  const title = state === "working" ? "⏳ <b>Nabees Agent is working</b>" : state === "done" ? "✅ <b>Task completed</b>" : "⚠️ <b>Task stopped</b>";
-  const lines = events.slice(-8).map((event) => `• ${escapeHtml(event)}`).join("\n");
-  const details = [`<b>Profile:</b> ${escapeHtml(profile)}`, `<b>Task:</b> ${escapeHtml(String(task).slice(0, 500))}`, "", "<b>Progress</b>", lines || "Starting…"].join("\n");
-  return `${title}\n<blockquote expandable>${details}</blockquote>`;
+function markdownToHtml(markdown) {
+  return String(markdown ?? "").split("```").map((part, index) => {
+    if (index % 2 === 1) return "<pre>" + escapeHtml(part.replace(/^\w+\n/, "")) + "</pre>";
+    return escapeHtml(part)
+      .replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>")
+      .replace(/(?<!\*)\*([^*]+)\*(?!\*)/g, "<i>$1</i>")
+      .replace(/`([^`]+)`/g, "<code>$1</code>");
+  }).join("");
+}
+
+function humanizeTool(name) {
+  return String(name || "agent action")
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function progressMessage(task, profile, events, state = "working", answer = "", checkpoint = "") {
+  const lines = events.slice(-10).map((event) => "• " + escapeHtml(event)).join("\n");
+  const details = [
+    "<b>Activity log</b>",
+    "<b>Profile:</b> " + escapeHtml(profile),
+    "<b>Request:</b> " + escapeHtml(String(task).slice(0, 500)),
+    "",
+    lines || "No additional activity recorded."
+  ];
+  if (checkpoint) details.push("", "<b>Saved log:</b> <code>" + escapeHtml(checkpoint) + "</code>");
+
+  if (state === "working") {
+    const current = events.at(-1) || "Working on your request…";
+    return "⏳ " + escapeHtml(current) + "\n<blockquote expandable>" + details.join("\n") + "</blockquote>";
+  }
+  const heading = state === "done" ? "" : "<b>I couldn't complete that request.</b>\n\n";
+  const main = heading + markdownToHtml(answer || "No response was returned.");
+  return main + "\n\n<blockquote expandable>" + details.join("\n") + "</blockquote>";
+}
+
+function suggestFollowups(task, answer) {
+  const source = String(task + "\n" + answer).toLowerCase();
+  let choices = [];
+  if (/\b(error|failed|failure|exception|bug|issue|doesn't work|not working)\b/.test(source)) {
+    choices = ["Investigate the error", "Try a fix and verify it"];
+  } else if (/\b(code|repository|repo|file|implementation|function|script|build|deploy|commit)\b/.test(source)) {
+    choices = ["Review the changes", "Test the implementation"];
+  } else if (/\b(plan|steps|roadmap|first step|next step|workflow)\b/.test(source)) {
+    choices = ["Start the next step", "Expand the plan"];
+  } else if (/\b(explain|meaning|how does|what is|why does|concept)\b/.test(source)) {
+    choices = ["Give me a practical example", "Explain it more simply"];
+  }
+  if (/\b(compare|versus|\bvs\b|options|alternatives)\b/.test(source)) {
+    choices = ["Compare the options in more detail", "Recommend the best option"];
+  }
+  return [...new Set(choices)].slice(0, 2);
+}
+
+function createFollowupButtons(task, answer) {
+  const choices = suggestFollowups(task, answer);
+  if (!choices.length) return [];
+  const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+  pendingFollowups.set(id, { task, choices });
+  while (pendingFollowups.size > 30) pendingFollowups.delete(pendingFollowups.keys().next().value);
+  return choices.map((choice, index) => ({
+    text: choice,
+    data: `${CALLBACK_PREFIX}f:${id}:${index}`
+  }));
 }
 
 async function sendProgressMessage(chatId, text) {
@@ -280,9 +340,15 @@ async function sendProgressMessage(chatId, text) {
   }
 }
 
-async function editProgressMessage(chatId, messageId, text) {
+async function editProgressMessage(chatId, messageId, text, buttons = []) {
   try {
-    return await telegram("editMessageText", { chat_id: chatId, message_id: messageId, text, parse_mode: "HTML" });
+    return await telegram("editMessageText", {
+      chat_id: chatId,
+      message_id: messageId,
+      text,
+      parse_mode: "HTML",
+      ...(buttons.length ? { reply_markup: legacyKeyboard(buttons) } : {})
+    });
   } catch (error) {
     if (/message is not modified/i.test(error?.message || "")) return null;
     if (/parse entities|unsupported start tag|can't parse/i.test(error?.message || "")) {
@@ -435,6 +501,32 @@ async function handleCallback(callback) {
     return;
   }
 
+  // Contextual follow-up buttons are generated from the completed answer and run
+  // as a continuation by editing the same Telegram message.
+  if (action.startsWith("f:")) {
+    if (!isOwner(userId) || chat?.type !== "private") {
+      await telegram("answerCallbackQuery", { callback_query_id: callbackId, text: "Only the owner can continue this task.", show_alert: true });
+      return;
+    }
+    const match = action.match(/^f:([a-z0-9]+):(\d+)$/i);
+    const entry = match ? pendingFollowups.get(match[1]) : null;
+    const index = match ? Number(match[2]) : -1;
+    if (!entry || !Number.isInteger(index) || index < 0 || index >= entry.choices.length) {
+      await telegram("answerCallbackQuery", { callback_query_id: callbackId, text: "This follow-up has expired.", show_alert: true });
+      return;
+    }
+    const selected = entry.choices[index];
+    await telegram("answerCallbackQuery", { callback_query_id: callbackId, text: "Continuing: " + selected });
+    const followupTask = "Continue from the previous request and its result. Original request: " + entry.task + "\nFollow-up requested: " + selected + ". Use the previous conversation for context and carry this out.";
+    await handleMessage({
+      chat,
+      from: callback.from,
+      text: followupTask,
+      message_id: callback.message?.message_id
+    }, { messageId: callback.message?.message_id });
+    return;
+  }
+
   let response;
   let buttons = menuButtons(!groupView);
 
@@ -496,7 +588,7 @@ async function handleCallback(callback) {
   }
 }
 
-async function handleMessage(message) {
+async function handleMessage(message, taskOptions = {}) {
   const chatId = message.chat?.id;
   const senderId = message.from?.id;
   const text = message.text?.trim();
@@ -567,16 +659,16 @@ async function handleMessage(message) {
   }
 
   activeTask = { task, profile: selectedProfile, startedAt: new Date().toISOString() };
-  const progressEvents = ["Task received.", "Preparing the agent and loading its profile."];
-  let progressMessageId = null;
+  const progressEvents = ["Request received."];
+  let progressMessageId = taskOptions.messageId || null;
   let progressTimer = null;
   let progressEditBusy = false;
-  const refreshProgress = async (state = "working") => {
+  const refreshProgress = async (state = "working", answer = "", checkpoint = "", buttons = []) => {
     if (progressEditBusy) return;
     progressEditBusy = true;
     try {
-      const text = progressMessage(task, activeTask?.profile || selectedProfile, progressEvents, state);
-      if (progressMessageId) await editProgressMessage(chatId, progressMessageId, text);
+      const text = progressMessage(task, activeTask?.profile || selectedProfile, progressEvents, state, answer, checkpoint);
+      if (progressMessageId) await editProgressMessage(chatId, progressMessageId, text, buttons);
       else {
         const sent = await sendProgressMessage(chatId, text);
         progressMessageId = sent?.message_id || null;
@@ -594,38 +686,38 @@ async function handleMessage(message) {
       profile: activeTask.profile,
       history: conversationHistory,
       onProgress: (event) => {
-        if (event.type === "model_start") progressEvents.push(`Step ${event.step}/${event.maxSteps}: reasoning and selecting the next action.`);
-        else if (event.type === "tool_start") progressEvents.push(`Step ${event.step}/${event.maxSteps}: ${event.message}`);
-        else if (event.type === "tool_done") progressEvents.push(event.message);
-        else if (event.type === "continuation") progressEvents.push(event.message);
-        if (progressEvents.length > 20) progressEvents.splice(0, progressEvents.length - 20);
+        if (event.type === "tool_start") {
+          progressEvents.push(event.message || ("Working with " + humanizeTool(event.tool)));
+        } else if (event.type === "tool_done") {
+          progressEvents.push(event.message || (humanizeTool(event.tool) + " finished."));
+        } else if (event.type === "continuation") {
+          progressEvents.push("Continuing with the remaining work.");
+        }
+        if (progressEvents.length > 30) progressEvents.splice(0, progressEvents.length - 30);
       }
     });
     if (Array.isArray(result.history)) conversationHistory = result.history;
     if (progressTimer) clearInterval(progressTimer);
     progressTimer = null;
 
-    // Some deterministic operations return a failed status instead of throwing.
-    // Respect that status so the progress card and final message stay accurate.
+    // Keep the answer and expandable activity log in the same Telegram message.
+    // Only offer follow-ups when the content suggests useful next actions.
     if (result.status === "failed" || result.status === "step_limit") {
-      const stopped = result.status === "step_limit";
-      progressEvents.push(stopped ? "Task stopped at its step limit." : "Task failed.");
-      await refreshProgress("failed");
-      await sendRich(chatId, `**Task ${stopped ? "stopped" : "failed"}**\n\n${result.answer}\n\n---\nCheckpoint: ${result.checkpoint}`, menuButtons());
+      progressEvents.push(result.status === "step_limit" ? "Work paused at the execution limit." : "The request ended with an error.");
+      await refreshProgress("failed", result.answer, result.checkpoint);
       return;
     }
 
-    progressEvents.push("Task completed successfully.");
-    await refreshProgress("done");
-    await sendRich(chatId, `**Task finished**\n\n${result.answer}\n\n---\nCheckpoint: ${result.checkpoint}`, menuButtons());
+    progressEvents.push("Finished.");
+    const followupButtons = createFollowupButtons(task, result.answer);
+    await refreshProgress("done", result.answer, result.checkpoint, followupButtons);
   } catch (error) {
     console.error("Agent task execution failed:", describeError(error));
     if (error?.stack) console.error(error.stack);
     if (progressTimer) clearInterval(progressTimer);
     progressTimer = null;
-    progressEvents.push(`Stopped: ${error.message || "Unknown error"}`);
-    await refreshProgress("failed");
-    await sendRich(chatId, `**Task failed**\n\n${error.message || "Unknown error"}`, menuButtons());
+    progressEvents.push("The request ended with an error.");
+    await refreshProgress("failed", error.message || "Unknown error");
   } finally {
     if (progressTimer) clearInterval(progressTimer);
     activeTask = null;
