@@ -17,25 +17,27 @@ Node.js autonomous agent powered by OpenRouter (configurable with an OpenAI-comp
 - Local task checkpoints and short-lived conversational context. Agent work automatically continues across up to three batches when it reaches `AGENT_MAX_STEPS`, with a maximum of 60 model steps per task.
 
 
-## Optional Camofox browser backend
+## Camofox browser backend
 
-Camofox runs as a separate browser service; this agent does not install or start the browser server automatically. Deploy `jo-inc/camofox-browser` separately, confirm its `/health` endpoint works, and keep it private or protect it with `CAMOFOX_ACCESS_KEY`.
+Camofox is the default browser backend. The agent starts the Camofox browser service automatically the first time it needs a browser tool. It first checks whether a compatible local service is already running. Otherwise, it finds an available port starting at `9377`, launches `@askjo/camofox-browser`, waits for the service health and API checks, and updates its in-memory browser URL. If the first-run install is needed, npm downloads the package and Camoufox browser bundle (roughly 300 MB). The service binds to loopback only and receives a generated access key if you have not supplied one.
 
-Add these variables to the agent's `.env` to configure the default Camofox browser:
+No manual base URL or access key is normally needed for a local service. Optional settings:
 
 ```dotenv
 BROWSER_BACKEND=camofox
+# Optional preferred local port; if occupied, the agent searches subsequent ports.
 CAMOFOX_BASE_URL=http://127.0.0.1:9377
-# Optional, if the Camofox service has CAMOFOX_ACCESS_KEY enabled:
-CAMOFOX_ACCESS_KEY=your-service-access-key
-# Optional stable session identity:
+# Optional stable key; otherwise one is generated at runtime for the local service.
+CAMOFOX_ACCESS_KEY=
 CAMOFOX_USER_ID=nabees-agent
 CAMOFOX_SESSION_KEY=telegram
+# Set false to disable automatic local startup.
+CAMOFOX_AUTOSTART=true
 ```
 
-If Camofox is on another host, set `CAMOFOX_BASE_URL` to its private service URL and enable the service's access key. Do not expose an unauthenticated browser-control API to the public internet. Set `BROWSER_BACKEND=playwright` only if you intentionally want to switch back to Playwright.
+If `CAMOFOX_BASE_URL` points to a remote host, the agent will connect to it but will not attempt to start a service on that remote machine. Set the matching `CAMOFOX_ACCESS_KEY` when the remote service uses authentication. Keep the browser-control API private; do not expose it unauthenticated to the public internet. Set `BROWSER_BACKEND=playwright` only if you intentionally want to switch back to Playwright.
 
-The adapter supports opening/navigating/listing tabs, snapshots, click/type/press/scroll/wait, page-context JavaScript evaluation, native select changes, file upload, screenshots, links/images, downloads, back/forward, refresh, and close. Uploads require the agent and Camofox service to share a filesystem path inside Camofox's configured upload directory. Keep the Camofox API private or protected with an access key. Camofox may improve compatibility on some sites, but it is not guaranteed to pass every anti-bot challenge; the agent must not attempt to defeat access-control challenges.
+The adapter supports opening/navigating/listing tabs, snapshots, click/type/press/scroll/wait, page-context JavaScript evaluation, native select changes, file upload, screenshots, links/images, downloads, back/forward, refresh, and close. Uploads require the agent and Camofox service to share a filesystem path inside Camofox's configured upload directory. Camofox may improve compatibility on some sites, but it is not guaranteed to pass every anti-bot challenge; the agent must not attempt to defeat access-control challenges.
 
 ## Chat providers
 

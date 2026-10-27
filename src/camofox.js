@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { config } from "./config.js";
+import { ensureCamofoxService } from "./camofox-service.js";
 
 const tabs = new Map();
 const userId = process.env.CAMOFOX_USER_ID || "nabees-agent";
@@ -49,6 +50,7 @@ function pickText(data) {
 }
 
 export async function executeCamofoxTool(name, args) {
+  await ensureCamofoxService();
   if (name === "browser_open") {
     if (args.tab_id) {
       const localId = String(args.tab_id);
