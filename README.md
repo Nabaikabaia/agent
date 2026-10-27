@@ -1,6 +1,6 @@
 # Nabees Autonomous Agent
 
-Node.js autonomous agent powered by Oxion AI. It accepts natural-language tasks through Telegram and uses tools to research, inspect files, install project dependencies, work with GitHub, and run project checks.
+Node.js autonomous agent powered by OpenRouter (configurable with an OpenAI-compatible API). It accepts natural-language tasks through Telegram and uses tools to research, inspect files, install project dependencies, work with GitHub, and run project checks.
 
 ## Capabilities
 
@@ -20,7 +20,7 @@ Node.js autonomous agent powered by Oxion AI. It accepts natural-language tasks 
 Requires Node.js 20+ and a running Box/workspace.
 
 1. Copy `.env.example` to `.env`.
-2. Set `OXION_API_KEY` and verify `OXION_MODEL` in your Oxion dashboard.
+2. Create an API key at [OpenRouter](https://openrouter.ai/keys) and set `OPENROUTER_API_KEY` in `.env`. The default model is `nvidia/nemotron-3-ultra:free`; free model availability and quotas can change. You can set `OPENROUTER_MODEL` to another model from the OpenRouter catalog.
 3. Install dependencies and Chromium: `npm install` then `npm run browser:install`.
 4. Create a bot with Telegram **@BotFather** and find your numeric Telegram user ID.
 5. Set `TELEGRAM_BOT_TOKEN` and `TELEGRAM_OWNER_ID`.
@@ -56,7 +56,7 @@ The Telegram controller keeps up to 10 exchanges in memory; context resets when 
 
 - Package installation is project-local; global installs are unsupported. Each package installation request requires explicit owner approval in Telegram. Rejecting, timing out, or restarting while awaiting a decision does not install the package.
 - Commands run without a shell, have a supported executable list, timeouts, and output limits. Pipes and redirections are unsupported.
-- Playwright renders JavaScript-heavy pages and can interact with ordinary page controls. Screenshots are saved to disk; image-based reasoning depends on the configured Oxion model supporting vision, which is not assumed by this code.
+- Playwright renders JavaScript-heavy pages and can interact with ordinary page controls. Screenshots are saved to disk; image-based reasoning depends on the configured model supporting vision, which is not assumed by this code.
 - Browser HTTP(S) requests to private/local network targets and metadata hosts are blocked by default. Do not enable local access except in a trusted development workflow.
 - GitHub API access supports public repository endpoints; private access needs `GITHUB_TOKEN`.
 - Dependency installation and project scripts can execute third-party code. Inspect unfamiliar scripts and use a disposable, isolated container for untrusted code.
