@@ -14,7 +14,7 @@ Do not deploy, push commits to remotes, run destructive Git operations, delete u
 Keep updates concise. Prefer small, coherent changes. When finished, summarize what changed, checks run, and anything still blocked.`;
 
 function isSelfUpdateRequest(task) {
-  return /^\\s*(?:please\\s+)?(?:update|pull|sync|refresh)\\s+(?:yourself|the\\s+agent|this\\s+agent)\\b.*\\b(?:github|git\\s*hub)\\b\\s*[.!?]*\\s*$/i.test(task);
+  return /^\s*(?:please\s+)?(?:update|pull|sync|refresh)\s+(?:yourself|the\s+agent|this\s+agent)\b.*\b(?:github|git\s*hub)\b\s*[.!?]*\s*$/i.test(task);
 }
 
 export async function runAgent(task, options = {}) {
@@ -49,7 +49,7 @@ export async function runAgent(task, options = {}) {
     try {
       const result = await executeTool("update_repository", {});
       const answer = result?.updated
-        ? `Repository update completed on branch ${result.branch}.\\n${result.output || "Git pull completed."}\\nCurrent commit: ${result.currentCommit || "unknown"}. Restart the agent process to load the updated code.`
+        ? `Repository update completed on branch ${result.branch}.\n${result.output || "Git pull completed."}\nCurrent commit: ${result.currentCommit || "unknown"}. Restart the agent process to load the updated code.`
         : "The repository updater returned without confirming an update.";
       record.status = result?.updated ? "completed" : "failed";
       record.answer = answer;
