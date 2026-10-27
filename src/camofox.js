@@ -11,8 +11,8 @@ function endpoint(path) {
   return new URL(path, config.camofoxBaseUrl);
 }
 
-async function request(method, path, body) {
-  const headers = { Accept: "application/json" };
+async function request(method, path, body, { binary = false } = {}) {
+  const headers = { Accept: binary ? "image/png" : "application/json" };
   if (body !== undefined) headers["Content-Type"] = "application/json";
   if (config.camofoxAccessKey) headers.Authorization = `Bearer ${config.camofoxAccessKey}`;
   const response = await fetch(endpoint(path), {
@@ -21,13 +21,16 @@ async function request(method, path, body) {
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     signal: AbortSignal.timeout(45_000)
   });
-  const raw = await response.text();
-  let data;
-  try { data = raw ? JSON.parse(raw) : {}; } catch { data = { text: raw.slice(0, 2000) }; }
   if (!response.ok) {
-    throw new Error(`Camofox API ${method} ${path} returned HTTP ${response.status}: ${JSON.stringify(data).slice(0, 1200)}`);
+    const raw = await response.text();
+    let details;
+    try { details = raw ? JSON.parse(raw) : {}; } catch { details = { text: raw.slice(0, 2000) }; }
+    throw new Error(`Camofox API ${method} ${path} returned HTTP ${response.status}: ${JSON.stringify(details).slice(0, 1200)}`);
   }
-  return data;
+  if (binary) return Buffer.from(await response.arrayBuffer());
+  const raw = await response.text();
+  try { return raw ? JSON.parse(raw) : {}; }
+  catch { return { text: raw.slice(0, 2000) }; }
 }
 
 function remoteId(tabId) {
@@ -47,15 +50,24 @@ function pickText(data) {
 
 export async function executeCamofoxTool(name, args) {
   if (name === "browser_open") {
-    const data = await request("POST", "/tabs", {
-      userId, sessionKey, url: args.url
-    });
+    if (args.tab_id) {
+      const localId = String(args.tab_id);
+      const tab = tabs.get(localId);
+      if (!tab) throw new Error("Unknown Camofox tab. Use browser_list_tabs or browser_open first.");
+      const data = await request("POST", `/tabs/${encodeURIComponent(tab.remoteId)}/navigate`, {
+        userId, url: args.url
+      });
+      tab.url = data.url || args.url;
+      tab.title = data.title || tab.title;
+      return { tab_id: localId, url: tab.url, title: tab.title, status: data.httpStatus ?? null, browser: "camofox", details: data };
+    }
+    const data = await request("POST", "/tabs", { userId, sessionKey, url: args.url });
     const remote = String(data.tabId ?? data.tab_id ?? data.id ?? "");
     if (!remote) throw new Error("Camofox created a tab but returned no tab identifier.");
     const id = `camofox-tab-${nextId++}`;
     const tab = { id, remoteId: remote, url: data.url || args.url, title: data.title || "" };
     tabs.set(id, tab);
-    return { tab_id: id, url: tab.url, title: tab.title, status: data.status ?? null, browser: "camofox", details: data };
+    return { tab_id: id, url: tab.url, title: tab.title, status: data.httpStatus ?? null, browser: "camofox", details: data };
   }
 
   if (name === "browser_list_tabs") {
@@ -92,7 +104,7 @@ export async function executeCamofoxTool(name, args) {
     const data = await request("POST", `/tabs/${encodeURIComponent(id)}/click`, {
       userId, ...(isElementRef ? { ref: candidate } : { selector: args.selector }), ...(args.wait_ms ? { waitMs: Math.min(5000, Number(args.wait_ms)) } : {})
     });
-    return tabResult(args.tab_id, { clicked: ref, details: data, browser: "camofox" });
+    return tabResult(args.tab_id, { clicked: candidate, details: data, browser: "camofox" });
   }
 
   if (name === "browser_type" || name === "browser_fill") {
@@ -153,19 +165,16 @@ export async function executeCamofoxTool(name, args) {
 
   if (name === "browser_screenshot") {
     const id = remoteId(args.tab_id);
-    const data = await request("GET", `/tabs/${encodeURIComponent(id)}/screenshot?userId=${encodeURIComponent(userId)}`);
-    const candidates = [data.screenshot, data.data, data.image, data.base64, data.screenshotBase64];
-    let encoded = candidates.find((value) => typeof value === "string" && value.length > 0);
-    if (encoded?.startsWith("data:image/")) encoded = encoded.slice(encoded.indexOf(",") + 1);
-    if (encoded && /^[A-Za-z0-9+/=\r\n]+$/.test(encoded)) {
-      const dir = path.resolve(config.workspace, "browser-screenshots");
-      await fs.mkdir(dir, { recursive: true });
-      const file = path.join(dir, `screenshot-camofox-${Date.now()}.png`);
-      await fs.writeFile(file, Buffer.from(encoded, "base64"));
-      const tab = tabs.get(String(args.tab_id));
-      return { tab_id: args.tab_id, file: path.relative(config.workspace, file), url: data.url || tab.url, browser: "camofox" };
+    const image = await request("GET", `/tabs/${encodeURIComponent(id)}/screenshot?userId=${encodeURIComponent(userId)}`, undefined, { binary: true });
+    if (image.length < 8 || image.subarray(0, 8).toString("hex") !== "89504e470d0a1a0a") {
+      throw new Error("Camofox screenshot response was not a valid PNG image.");
     }
-    throw new Error("Camofox screenshot response did not include a recognised base64 image field.");
+    const dir = path.resolve(config.workspace, "browser-screenshots");
+    await fs.mkdir(dir, { recursive: true });
+    const file = path.join(dir, `screenshot-camofox-${Date.now()}.png`);
+    await fs.writeFile(file, image);
+    const tab = tabs.get(String(args.tab_id));
+    return { tab_id: args.tab_id, file: path.relative(config.workspace, file), url: tab.url, browser: "camofox" };
   }
 
   if (name === "browser_downloads") {
