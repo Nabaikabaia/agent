@@ -9,7 +9,7 @@ Node.js autonomous agent powered by OpenRouter (configurable with an OpenAI-comp
 - Workspace file listing, reading, and writing.
 - Public web search and readable-page fetching.
 - Real Playwright Chromium browser: JavaScript-rendered pages, multiple isolated tabs, DOM snapshots, clicks, form filling, keyboard input, selects, scrolling, condition-based waits, workspace file uploads, page-context JavaScript, screenshots, and downloads.
-- Browser downloads and screenshots saved under the configured workspace.
+- Browser downloads and screenshots saved under the configured workspace, with a Telegram photo-delivery tool for sending supported images to the configured owner.
 - GitHub REST API access for repositories, contents, commits, issues, pull requests, releases, and search.
 - Project-local package installation with npm, pnpm, yarn, or bun.
 - Controlled one-command-at-a-time execution for development, tests, builds, and Git inspection.
@@ -56,7 +56,7 @@ The Telegram controller keeps up to 10 exchanges in memory; context resets when 
 
 - Package installation is project-local; global installs are unsupported. Each package installation request requires explicit owner approval in Telegram. Rejecting, timing out, or restarting while awaiting a decision does not install the package.
 - Commands run without a shell, have a supported executable list, timeouts, and output limits. Pipes and redirections are unsupported.
-- Playwright renders JavaScript-heavy pages and can interact with ordinary page controls. Screenshots are saved to disk; image-based reasoning depends on the configured model supporting vision, which is not assumed by this code.
+- Playwright renders JavaScript-heavy pages and can interact with ordinary page controls. Screenshots are saved to disk and can be sent to the configured Telegram owner using `send_telegram_photo`; image-based reasoning depends on the configured model supporting vision, which is not assumed by this code.
 - Browser HTTP(S) requests to private/local network targets and metadata hosts are blocked by default. Do not enable local access except in a trusted development workflow.
 - GitHub API access supports public repository endpoints; private access needs `GITHUB_TOKEN`.
 - Dependency installation and project scripts can execute third-party code. Inspect unfamiliar scripts and use a disposable, isolated container for untrusted code.
