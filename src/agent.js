@@ -22,7 +22,13 @@ function isBasicChatMessage(task) {
   const text = task.trim();
   if (!text || text.length > 500) return false;
   if (/^\/(?:task|agent|agents|status|help|start)\b/i.test(text)) return false;
-  return !/^(?:(?:please\s+)?(?:can|could|would)\s+you\s+)?(?:update|pull|sync|refresh|create|build|fix|edit|write|make|run|execute|install|deploy|search|find|open|download|send|generate|research|analy[sz]e|inspect|check|read|list|summari[sz]e|compare|convert|delete|remove|add|change|implement|test|commit|push|browse|fetch|scrape|code|review|investigate|continue|try|start|expand|apply|verify|debug)\b/i.test(text);
+
+  // Tool-oriented requests must never go to the plain chat adapter. It has no
+  // browser tools and may offer to do work instead of actually executing it.
+  const toolIntent = /\b(?:screenshot|screenshots|capture (?:the )?(?:screen|page|website)|browser|browse|visit (?:the )?(?:web|website|page)|open (?:the )?(?:web|website|page|url)|website|webpage|web page|https?:\/\/|google\.com|send (?:me )?(?:the )?(?:image|photo|file|document)|attach(?:ment)?|download|upload|repository|repo|github|workspace|terminal|shell|run (?:the )?(?:command|script|test)|execute|install|deploy|debug|inspect (?:the )?(?:site|website|page|code|repo|file)|edit (?:the )?(?:file|code|image)|write (?:the )?(?:file|code)|create (?:a )?(?:file|project|website)|build (?:a )?(?:file|project|website)|search the web|research|fetch (?:the )?(?:url|page|file))\b/i;
+  if (toolIntent.test(text)) return false;
+
+  return !/^(?:(?:please\s+)?(?:can|could|would)\s+you\s+)?(?:update|pull|sync|refresh|create|build|fix|edit|write|make|run|execute|install|deploy|search|find|open|download|send|generate|research|analy[sz]e|inspect|check|read|list|summari[sz]e|compare|convert|delete|remove|add|change|implement|test|commit|push|browse|fetch|scrape|code|review|investigate|continue|try|start|expand|apply|verify|debug|visit|capture|screenshot)\b/i.test(text);
 }
 
 function basicChatFallback(task) {
@@ -59,6 +65,48 @@ export async function runAgent(task, options = {}) {
     await fs.writeFile(checkpoint, JSON.stringify(record, null, 2), { mode: 0o600 });
   };
   await save();
+
+  // A simple website screenshot is a deterministic browser workflow. Run it
+  // directly so it does not depend on OpenRouter credits or a model choosing tools.
+  const screenshotIntent = /\b(?:screenshot|screenshots|capture (?:the )?(?:screen|page|website)|take (?:a )?screenshot|screen ?shot)\b/i.test(task);
+  if (screenshotIntent) {
+    const match = task.match(/https?:\/\/[^\s<>()]+|\b(?:www\.)?[a-z0-9-]+(?:\.[a-z0-9-]+)+(?:\/[^\s<>()]*)?/i);
+    const requestedUrl = match?.[0] ? (/^https?:\/\//i.test(match[0]) ? match[0] : "https://" + match[0]).replace(/[.,!?;]+$/, "") : "";
+    if (!requestedUrl) {
+      const answer = "Which website should I open and screenshot? Send me its URL (for example, https://example.com), and I’ll capture it and send the image here.";
+      record.status = "completed";
+      record.answer = answer;
+      record.finishedAt = new Date().toISOString();
+      await save();
+      return { answer, status: record.status, checkpoint, history: [...previousTurns, { role: "user", content: task.trim() }, { role: "assistant", content: answer }].slice(-20) };
+    }
+
+    try {
+      options.onProgress?.({ type: "tool_start", tool: "browser_open", message: "Opening the requested website…" });
+      const opened = await executeTool("browser_open", { url: requestedUrl, wait_until: "domcontentloaded", timeout_ms: 30000 });
+      options.onProgress?.({ type: "tool_done", tool: "browser_open", message: "Website opened: " + (opened.title || opened.url || requestedUrl) });
+      options.onProgress?.({ type: "tool_start", tool: "browser_screenshot", message: "Capturing the website screenshot…" });
+      const captured = await executeTool("browser_screenshot", { tab_id: opened.tab_id, full_page: true });
+      options.onProgress?.({ type: "tool_done", tool: "browser_screenshot", message: "Screenshot captured." });
+      options.onProgress?.({ type: "tool_start", tool: "send_telegram_photo", message: "Sending the screenshot to this Telegram chat…" });
+      await executeTool("send_telegram_photo", { path: captured.file, caption: "Website screenshot: " + (opened.title || opened.url || requestedUrl) });
+      options.onProgress?.({ type: "tool_done", tool: "send_telegram_photo", message: "Screenshot sent to Telegram." });
+      const answer = "I opened " + (opened.title || opened.url || requestedUrl) + ", captured a full-page screenshot, and sent the image to this chat.";
+      record.status = "completed";
+      record.answer = answer;
+      record.finishedAt = new Date().toISOString();
+      await save();
+      return { answer, status: record.status, checkpoint, history: [...previousTurns, { role: "user", content: task.trim() }, { role: "assistant", content: answer }].slice(-20) };
+    } catch (error) {
+      const answer = "I couldn’t complete the screenshot workflow: " + (error.message || "Unknown browser or Telegram error.");
+      record.status = "failed";
+      record.error = error.message || "Screenshot workflow failed";
+      record.answer = answer;
+      record.finishedAt = new Date().toISOString();
+      await save();
+      return { answer, status: record.status, checkpoint, history: [...previousTurns, { role: "user", content: task.trim() }, { role: "assistant", content: answer }].slice(-20) };
+    }
+  }
 
   // Ordinary conversation uses the previously shared GPT-5 ChatGPT client,
   // not OpenRouter's tool-planning model. Tool-oriented requests continue below.
