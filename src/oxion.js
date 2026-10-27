@@ -1,6 +1,78 @@
 import { config } from "./config.js";
 
-export async function chatCompletion(messages, tools) {
+const PREFERRED_FREE_TOOL_MODELS = [
+  "nvidia/nemotron-3.5-lightning:free",
+  "thinkingmachines/inkling-small:free",
+  "thinkingmachines/inkling:free",
+  "xingchen-agi/xing4.0-29b-a4b:free",
+  "cohere/north-mini-code:free",
+  "nvidia/nemotron-3.5-super-vl:free",
+  "recursive/flint-v1.0:free"
+];
+
+let freeModelCache = { expiresAt: 0, ids: [] };
+
+function isDailyFreeQuotaError(message = "") {
+  return /free-models-per-day|free model.*(daily|day).*limit|daily.*free.*model.*limit/i.test(message);
+}
+
+function isRetryable(status, message = "") {
+  if (!status) return true; // Network failure.
+  if (status === 408 || status === 409 || status === 425 || status === 429 || status >= 500) return true;
+  return (status === 400 || status === 404) &&
+    /model.{0,40}(not found|not available|unavailable|does not exist)|no endpoints|provider.{0,30}(unavailable|error)|tool.{0,30}(unsupported|not supported)/i.test(message);
+}
+
+function quotaMessage() {
+  return "OpenRouter's daily free-model quota is exhausted. OpenRouter applies this limit across free models, so switching to another :free model will not bypass it. Wait for the daily allowance to reset or use a separately available non-free model. Adding credits is optional.";
+}
+
+async function getFreeToolModelIds() {
+  if (freeModelCache.expiresAt > Date.now() && freeModelCache.ids.length) {
+    return freeModelCache.ids;
+  }
+
+  const available = new Set();
+  try {
+    const response = await fetch(`${config.baseUrl}/models`, {
+      headers: { Authorization: `Bearer ${config.apiKey}` },
+      signal: AbortSignal.timeout(10_000)
+    });
+    if (response.ok) {
+      const payload = await response.json();
+      for (const model of payload?.data || []) {
+        const id = model?.id;
+        const pricing = model?.pricing;
+        const parameters = model?.supported_parameters;
+        if (
+          typeof id === "string" &&
+          id.endsWith(":free") &&
+          pricing?.prompt === "0" &&
+          pricing?.completion === "0" &&
+          Array.isArray(parameters) &&
+          parameters.includes("tools")
+        ) {
+          available.add(id);
+        }
+      }
+    }
+  } catch {
+    // Use the curated current list below when model discovery is unavailable.
+  }
+
+  const discovered = [
+    ...PREFERRED_FREE_TOOL_MODELS.filter((id) => available.has(id)),
+    ...[...available].filter((id) => !PREFERRED_FREE_TOOL_MODELS.includes(id)).sort()
+  ];
+  const ids = discovered.length
+    ? discovered
+    : PREFERRED_FREE_TOOL_MODELS;
+
+  freeModelCache = { expiresAt: Date.now() + 5 * 60_000, ids };
+  return ids;
+}
+
+async function requestModel(model, messages, tools) {
   let response;
   try {
     response = await fetch(`${config.baseUrl}/chat/completions`, {
@@ -10,7 +82,7 @@ export async function chatCompletion(messages, tools) {
         "Content-Type": "application/json"
       },
       body: JSON.stringify({
-        model: config.model,
+        model,
         messages,
         tools,
         tool_choice: "auto",
@@ -19,10 +91,14 @@ export async function chatCompletion(messages, tools) {
       signal: AbortSignal.timeout(config.aiRequestTimeoutMs)
     });
   } catch (error) {
-    if (error?.name === "TimeoutError" || error?.name === "AbortError") {
-      throw new Error(`AI provider request timed out after ${Math.round(config.aiRequestTimeoutMs / 1000)} seconds. The provider/model may be overloaded; try again or choose another OpenRouter model.`, { cause: error });
-    }
-    throw error;
+    const timeout = error?.name === "TimeoutError" || error?.name === "AbortError";
+    return {
+      model,
+      status: 0,
+      error: new Error(timeout
+        ? `Request timed out after ${Math.round(config.aiRequestTimeoutMs / 1000)} seconds.`
+        : (error.message || "Network request failed."))
+    };
   }
 
   const raw = await response.text();
@@ -30,18 +106,76 @@ export async function chatCompletion(messages, tools) {
   try {
     data = JSON.parse(raw);
   } catch {
-    throw new Error(`AI provider returned non-JSON (HTTP ${response.status}). Check the API base URL and model.`);
+    return {
+      model,
+      status: response.status,
+      error: new Error(`Provider returned non-JSON (HTTP ${response.status}).`)
+    };
   }
 
   if (!response.ok) {
-    const message = data?.error?.message || data?.message || `HTTP ${response.status}`;
-    if (/free-models-per-day|free model.*(daily|day).*limit|daily.*free.*model.*limit/i.test(message)) {
-      throw new Error("OpenRouter's daily free-model quota is exhausted. Basic greetings and thanks are handled locally, but AI-powered tasks need the quota to reset or a different available model/provider configured in .env. Adding credits is optional; this code cannot reset the provider quota.");
-    }
-    throw new Error(`AI provider API error: ${message}`);
+    return {
+      model,
+      status: response.status,
+      error: new Error(data?.error?.message || data?.message || `HTTP ${response.status}`)
+    };
   }
 
   const choice = data?.choices?.[0];
-  if (!choice?.message) throw new Error("AI provider response did not contain choices[0].message.");
-  return choice.message;
+  if (!choice?.message) {
+    return {
+      model,
+      status: response.status,
+      error: new Error("Provider response did not contain choices[0].message.")
+    };
+  }
+
+  return { model, message: choice.message };
+}
+
+export async function chatCompletion(messages, tools) {
+  const primary = config.model;
+  const first = await requestModel(primary, messages, tools);
+  if (first.message) return first.message;
+
+  const firstError = first.error?.message || "Unknown provider error";
+  if (isDailyFreeQuotaError(firstError)) throw new Error(quotaMessage());
+  if (!isRetryable(first.status, firstError)) {
+    throw new Error(`AI provider API error from ${primary}: ${firstError}`);
+  }
+
+  const discovered = await getFreeToolModelIds();
+  const fallbacks = discovered
+    .filter((id) => id !== primary)
+    .slice(0, 5);
+
+  if (!fallbacks.length) {
+    throw new Error(`AI model ${primary} failed: ${firstError}. No alternate free tool-capable models were discovered.`);
+  }
+
+  const failures = [`${primary}: ${firstError}`];
+  console.warn(`[OpenRouter] Model ${primary} failed; trying up to ${fallbacks.length} free tool-capable fallback model(s).`);
+
+  for (const model of fallbacks) {
+    const result = await requestModel(model, messages, tools);
+    if (result.message) {
+      console.warn(`[OpenRouter] Fallback succeeded with model ${model}.`);
+      return result.message;
+    }
+
+    const message = result.error?.message || "Unknown provider error";
+    if (isDailyFreeQuotaError(message)) {
+      // This is an account-wide free-model quota, not a per-model outage.
+      throw new Error(quotaMessage());
+    }
+
+    failures.push(`${model}: ${message}`);
+    if (!isRetryable(result.status, message)) {
+      console.warn(`[OpenRouter] Fallback model ${model} returned a non-retryable error: ${message}`);
+    }
+  }
+
+  throw new Error(
+    `All attempted OpenRouter models failed. ${failures.join(" | ")}`
+  );
 }
