@@ -659,7 +659,9 @@ async function handleCallback(callback) {
       return;
     }
     const selected = entry.choices[index];
-    pendingFollowups.delete(match[1]);
+    // Keep sibling buttons valid: each button has its own index but shares this
+    // follow-up entry. Deleting the entry here made every other button expire
+    // immediately after the first one was pressed.
     await telegram("answerCallbackQuery", { callback_query_id: callbackId, text: "Continuing: " + selected });
     const followupTask = selected + " for the previous request. Original request: " + entry.task + ". Use the previous conversation and result as context, then carry this out.";
     await handleMessage({
