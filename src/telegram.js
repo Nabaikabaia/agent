@@ -347,12 +347,18 @@ async function editProgressMessage(chatId, messageId, text, buttons = []) {
       message_id: messageId,
       text,
       parse_mode: "HTML",
-      ...(buttons.length ? { reply_markup: legacyKeyboard(buttons) } : {})
+      reply_markup: buttons.length ? legacyKeyboard(buttons) : { inline_keyboard: [] }
     });
   } catch (error) {
     if (/message is not modified/i.test(error?.message || "")) return null;
     if (/parse entities|unsupported start tag|can't parse/i.test(error?.message || "")) {
-      return telegram("editMessageText", { chat_id: chatId, message_id: messageId, text: text.replace("<blockquote expandable>", "<blockquote>"), parse_mode: "HTML" });
+      return telegram("editMessageText", {
+        chat_id: chatId,
+        message_id: messageId,
+        text: text.replace("<blockquote expandable>", "<blockquote>"),
+        parse_mode: "HTML",
+        reply_markup: buttons.length ? legacyKeyboard(buttons) : { inline_keyboard: [] }
+      });
     }
     throw error;
   }
@@ -516,12 +522,13 @@ async function handleCallback(callback) {
       return;
     }
     const selected = entry.choices[index];
+    pendingFollowups.delete(match[1]);
     await telegram("answerCallbackQuery", { callback_query_id: callbackId, text: "Continuing: " + selected });
-    const followupTask = "Continue from the previous request and its result. Original request: " + entry.task + "\nFollow-up requested: " + selected + ". Use the previous conversation for context and carry this out.";
+    const followupTask = selected + " for the previous request. Original request: " + entry.task + ". Use the previous conversation and result as context, then carry this out.";
     await handleMessage({
       chat,
       from: callback.from,
-      text: followupTask,
+      text: "/task " + followupTask,
       message_id: callback.message?.message_id
     }, { messageId: callback.message?.message_id });
     return;
@@ -664,7 +671,9 @@ async function handleMessage(message, taskOptions = {}) {
   let progressTimer = null;
   let progressEditBusy = false;
   const refreshProgress = async (state = "working", answer = "", checkpoint = "", buttons = []) => {
-    if (progressEditBusy) return;
+    while (progressEditBusy) {
+      await new Promise((resolve) => setTimeout(resolve, 40));
+    }
     progressEditBusy = true;
     try {
       const text = progressMessage(task, activeTask?.profile || selectedProfile, progressEvents, state, answer, checkpoint);
