@@ -14,7 +14,33 @@ const CALLBACK_PREFIX = "na:";
 let activeTask = null;
 let selectedProfile = "general";
 let conversationHistory = [];
+const conversationMemoryPath = path.join(config.stateDir, "conversation-history.json");
 let stopping = false;
+
+async function loadConversationHistory() {
+  await fs.mkdir(config.stateDir, { recursive: true });
+  try {
+    const parsed = JSON.parse(await fs.readFile(conversationMemoryPath, "utf8"));
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter((item) => item && ["user", "assistant"].includes(item.role) && typeof item.content === "string")
+      .slice(-40);
+  } catch (error) {
+    if (error.code === "ENOENT") return [];
+    console.error("Could not load shared conversation memory:", error.message);
+    return [];
+  }
+}
+
+async function saveConversationHistory() {
+  await fs.mkdir(config.stateDir, { recursive: true });
+  const safeHistory = conversationHistory
+    .filter((item) => item && ["user", "assistant"].includes(item.role) && typeof item.content === "string")
+    .slice(-40);
+  const temporary = conversationMemoryPath + ".tmp";
+  await fs.writeFile(temporary, JSON.stringify(safeHistory, null, 2), { mode: 0o600 });
+  await fs.rename(temporary, conversationMemoryPath);
+}
 const pendingFollowups = new Map();
 
 function describeError(error) {
@@ -844,7 +870,10 @@ async function handleMessage(message, taskOptions = {}) {
         }
       }
     });
-    if (Array.isArray(result.history)) conversationHistory = result.history;
+    if (Array.isArray(result.history)) {
+      conversationHistory = result.history.slice(-40);
+      await saveConversationHistory();
+    }
     if (progressTimer) clearInterval(progressTimer);
     progressTimer = null;
 
@@ -883,6 +912,7 @@ export async function startTelegramController() {
     throw new Error("TELEGRAM_OWNER_ID must be your numeric Telegram user ID.");
   }
 
+  conversationHistory = await loadConversationHistory();
   const me = await telegram("getMe");
   console.log(`Telegram controller connected as @${me.username || me.id}`);
   console.log(`Authorized owner ID: ${config.telegramOwnerId}`);
