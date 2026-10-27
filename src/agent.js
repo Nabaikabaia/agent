@@ -92,7 +92,7 @@ export async function runAgent(task, options = {}) {
       record.finishedAt = new Date().toISOString();
       await save();
       options.onProgress?.({ type: "tool_done", step: 1, maxSteps: 1, tool: "update_repository", message: "Repository update failed." });
-      return { answer, checkpoint, history: [...previousTurns, { role: "user", content: task.trim() }, { role: "assistant", content: answer }].slice(-20) };
+      return { answer, status: record.status, checkpoint, history: [...previousTurns, { role: "user", content: task.trim() }, { role: "assistant", content: answer }].slice(-20) };
     }
   }
 
@@ -121,7 +121,7 @@ export async function runAgent(task, options = {}) {
         record.answer = answer;
         record.finishedAt = new Date().toISOString();
         await save();
-        return { answer, checkpoint, history: [...previousTurns, { role: "user", content: task.trim() }, { role: "assistant", content: answer }].slice(-20) };
+        return { answer, status: record.status, checkpoint, history: [...previousTurns, { role: "user", content: task.trim() }, { role: "assistant", content: answer }].slice(-20) };
       }
 
       for (const call of calls) {
@@ -171,7 +171,7 @@ export async function runAgent(task, options = {}) {
     record.answer = answer;
     record.finishedAt = new Date().toISOString();
     await save();
-    return { answer, checkpoint, history: [...previousTurns, { role: "user", content: task.trim() }, { role: "assistant", content: answer }].slice(-20) };
+    return { answer, status: record.status, checkpoint, history: [...previousTurns, { role: "user", content: task.trim() }, { role: "assistant", content: answer }].slice(-20) };
   } catch (error) {
     record.status = "failed";
     record.error = error.message || "Unknown error";
