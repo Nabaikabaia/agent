@@ -16,6 +16,12 @@ Node.js autonomous agent powered by OpenRouter (configurable with an OpenAI-comp
 - Controlled one-command-at-a-time execution for development, tests, builds, and Git inspection.
 - Local task checkpoints and short-lived conversational context. Agent work automatically continues across up to three batches when it reaches `AGENT_MAX_STEPS`, with a maximum of 60 model steps per task.
 
+## Chat providers
+
+- Ordinary conversational messages (for example, greetings and general questions) use the previously shared Android ChatGPT anonymous endpoint through `src/gpt5.js`; this path does not use the OpenRouter API key or its free-model quota.
+- Tool-using tasks and autonomous planning continue to use the OpenRouter-compatible endpoint configured in `.env`.
+- The Android ChatGPT endpoint is undocumented and is **not an official OpenAI API**. It can change, fail, or impose separate limits. It does not provide tool calling to this agent; autonomous tool execution remains handled by the agent loop.
+
 ## Setup
 
 Requires Node.js 20+ and a running Box/workspace.
