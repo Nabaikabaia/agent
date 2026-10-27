@@ -1,3 +1,5 @@
+import fs from "node:fs/promises";
+import path from "node:path";
 import { config } from "./config.js";
 
 const tabs = new Map();
@@ -144,7 +146,18 @@ export async function executeCamofoxTool(name, args) {
   if (name === "browser_screenshot") {
     const id = remoteId(args.tab_id);
     const data = await request("GET", `/tabs/${encodeURIComponent(id)}/screenshot?userId=${encodeURIComponent(userId)}`);
-    return tabResult(args.tab_id, { screenshot: data, browser: "camofox", note: "Camofox returned its screenshot payload; use its image/data field if a local file is required." });
+    const candidates = [data.screenshot, data.data, data.image, data.base64, data.screenshotBase64];
+    let encoded = candidates.find((value) => typeof value === "string" && value.length > 0);
+    if (encoded?.startsWith("data:image/")) encoded = encoded.slice(encoded.indexOf(",") + 1);
+    if (encoded && /^[A-Za-z0-9+/=\r\n]+$/.test(encoded)) {
+      const dir = path.resolve(config.workspace, "browser-screenshots");
+      await fs.mkdir(dir, { recursive: true });
+      const file = path.join(dir, `screenshot-camofox-${Date.now()}.png`);
+      await fs.writeFile(file, Buffer.from(encoded, "base64"));
+      const tab = tabs.get(String(args.tab_id));
+      return { tab_id: args.tab_id, file: path.relative(config.workspace, file), url: data.url || tab.url, browser: "camofox" };
+    }
+    throw new Error("Camofox screenshot response did not include a recognised base64 image field.");
   }
 
   if (name === "browser_downloads") {
