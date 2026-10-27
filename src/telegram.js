@@ -3,6 +3,7 @@ import fs from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { config, validateConfig } from "./config.js";
 import { runAgent } from "./agent.js";
+import { replyWithGpt5 } from "./gpt5.js";
 import { listProfiles, loadProfile } from "./profiles.js";
 import { registerChoicePromptSender, resolveUserChoice } from "./interaction.js";
 import { initializePackageApprovals, registerPackageApprovalNotifier, decidePackageApproval } from "./approvals.js";
@@ -481,16 +482,56 @@ function suggestFollowups(task, answer) {
   return [...new Set(choices)].slice(0, 2);
 }
 
-function createFollowupButtons(task, answer) {
-  const choices = suggestFollowups(task, answer);
+async function createFollowupButtons(task, answer) {
+  let choices = [];
+  const taskText = String(task || "").slice(0, 1800);
+  const resultText = String(answer || "").slice(0, 2600);
+
+  // Ask the conversational model for a few genuinely useful next steps.
+  // A short timeout and heuristic fallback keep completion responsive if AI is unavailable.
+  try {
+    const prompt = [
+      "You are choosing optional next-step buttons for a Telegram coding and productivity agent.",
+      "Return ONLY valid JSON in this exact shape: {\\"choices\\":[\\"short action\\"]}.",
+      "Suggest 0 to 3 concise, specific actions that logically follow from the completed task and its actual result.",
+      "Do not suggest work already completed. Do not offer generic choices just to fill space.",
+      "Suggest report/PDF/ZIP only when the result or task would benefit from that format.",
+      "Suggest PM2/server execution only when the task clearly concerns a runnable service or deployment.",
+      "Never imply a sensitive action is already approved; any selected action must still go through existing approval checks.",
+      "If there is no useful next step, return {\\"choices\\":[]}.",
+      "Original task:\\n" + taskText,
+      "Completed result:\\n" + resultText
+    ].join("\\n\\n");
+    const generated = await Promise.race([
+      replyWithGpt5(prompt, []),
+      new Promise((_, reject) => setTimeout(() => reject(new Error("follow-up suggestion timeout")), 8000))
+    ]);
+    const jsonText = String(generated || "").replace(/^\`\`\`(?:json)?\\s*/i, "").replace(/\`\`\`\\s*$/, "").trim();
+    const parsed = JSON.parse(jsonText);
+    if (Array.isArray(parsed.choices)) {
+      choices = parsed.choices
+        .filter((item) => typeof item === "string")
+        .map((item) => item.trim().replace(/[\\r\\n]+/g, " "))
+        .filter((item) => item.length >= 4 && item.length <= 48)
+        .filter((item) => !/^(?:finish|done|no thanks|skip)$/i.test(item))
+        .slice(0, 3);
+    }
+  } catch {
+    choices = suggestFollowups(task, answer);
+  }
+
+  choices = [...new Set(choices)];
   if (!choices.length) return [];
   const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
   pendingFollowups.set(id, { task, choices });
   while (pendingFollowups.size > 30) pendingFollowups.delete(pendingFollowups.keys().next().value);
-  return choices.map((choice, index) => ({
-    text: choice,
-    data: `${CALLBACK_PREFIX}f:${id}:${index}`
-  }));
+  return [
+    ...choices.map((choice, index) => ({
+      text: choice,
+      data: `${CALLBACK_PREFIX}f:${id}:${index}`
+    })),
+    { text: "Finish", data: `${CALLBACK_PREFIX}d:${id}`, separate: true, style: "link" }
+  ];
 }
 
 async function sendProgressMessage(chatId, text) {
@@ -667,6 +708,23 @@ async function handleCallback(callback) {
       text: result.ok ? `Selected: ${result.selected}. Continuing.` : result.reason,
       show_alert: !result.ok
     });
+    return;
+  }
+
+  // Finish dismisses optional follow-up suggestions without launching another task.
+  if (action.startsWith("d:")) {
+    if (!isOwner(userId) || chat?.type !== "private") {
+      await telegram("answerCallbackQuery", { callback_query_id: callbackId, text: "Only the owner can finish this task.", show_alert: true });
+      return;
+    }
+    const match = action.match(/^d:([a-z0-9]+)$/i);
+    const entry = match ? pendingFollowups.get(match[1]) : null;
+    if (!entry) {
+      await telegram("answerCallbackQuery", { callback_query_id: callbackId, text: "This follow-up has expired.", show_alert: true });
+      return;
+    }
+    pendingFollowups.delete(match[1]);
+    await telegram("answerCallbackQuery", { callback_query_id: callbackId, text: "Task finished. No further action taken." });
     return;
   }
 
@@ -884,7 +942,7 @@ async function handleMessage(message, taskOptions = {}) {
     }
 
     progressEvents.push("Finished.");
-    const followupButtons = createFollowupButtons(task, result.answer);
+    const followupButtons = await createFollowupButtons(task, result.answer);
     await sendRichHtml(chatId, progressMessage(task, activeTask.profile, progressEvents, "done", result.answer, result.checkpoint, followupButtons));
   } catch (error) {
     console.error("Agent task execution failed:", describeError(error));
