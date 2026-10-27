@@ -9,7 +9,7 @@ Node.js autonomous agent powered by OpenRouter (configurable with an OpenAI-comp
 - Workspace file listing, reading, and writing.
 - Public web search and readable-page fetching.
 - Real Playwright Chromium browser: JavaScript-rendered pages, multiple isolated tabs, DOM snapshots, clicks, form filling, keyboard input, selects, scrolling, condition-based waits, workspace file uploads, page-context JavaScript, screenshots, and downloads.
-- Browser downloads and screenshots saved under the configured workspace, with a Telegram photo-delivery tool for sending supported images to the configured owner.
+- Browser downloads and screenshots saved under the configured workspace, with Telegram photo delivery for screenshots and document delivery for downloadable files sent to the configured owner. Document delivery is limited to files in the configured workspace, blocks common secret/key files, and enforces a 45 MB limit.
 - GitHub REST API access for repositories, contents, commits, issues, pull requests, releases, and search.
 - Owner-requested private-repository updates using `GITHUB_TOKEN`, with fixed-origin validation, a clean-working-tree check, and fast-forward-only pulls.
 - Project-local package installation with npm, pnpm, yarn, or bun.
