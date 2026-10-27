@@ -604,6 +604,17 @@ async function handleMessage(message) {
     if (Array.isArray(result.history)) conversationHistory = result.history;
     if (progressTimer) clearInterval(progressTimer);
     progressTimer = null;
+
+    // Some deterministic operations return a failed status instead of throwing.
+    // Respect that status so the progress card and final message stay accurate.
+    if (result.status === "failed" || result.status === "step_limit") {
+      const stopped = result.status === "step_limit";
+      progressEvents.push(stopped ? "Task stopped at its step limit." : "Task failed.");
+      await refreshProgress("failed");
+      await sendRich(chatId, `**Task ${stopped ? "stopped" : "failed"}**\n\n${result.answer}\n\n---\nCheckpoint: ${result.checkpoint}`, menuButtons());
+      return;
+    }
+
     progressEvents.push("Task completed successfully.");
     await refreshProgress("done");
     await sendRich(chatId, `**Task finished**\n\n${result.answer}\n\n---\nCheckpoint: ${result.checkpoint}`, menuButtons());
