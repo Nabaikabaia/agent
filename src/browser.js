@@ -4,6 +4,7 @@ import dns from "node:dns/promises";
 import net from "node:net";
 import { chromium } from "playwright";
 import { config } from "./config.js";
+import { executeCamofoxTool } from "./camofox.js";
 
 const MAX_TEXT = 24_000;
 const tabs = new Map();
@@ -329,6 +330,7 @@ async function browserDownloads() {
 }
 
 export async function executeBrowserTool(name, args) {
+  if (config.browserBackend === "camofox") return await executeCamofoxTool(name, args);
   switch (name) {
     case "browser_open": return await browserOpen(args);
     case "browser_list_tabs": return await browserListTabs();
