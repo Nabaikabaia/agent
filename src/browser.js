@@ -330,7 +330,10 @@ async function browserDownloads() {
 }
 
 export async function executeBrowserTool(name, args) {
-  if (config.browserBackend === "camofox") return await executeCamofoxTool(name, args);
+  if (config.browserBackend === "camofox") {
+    if (name === "browser_open") await validateBrowserUrl(args.url);
+    return await executeCamofoxTool(name, args);
+  }
   switch (name) {
     case "browser_open": return await browserOpen(args);
     case "browser_list_tabs": return await browserListTabs();
