@@ -18,6 +18,21 @@ Node.js autonomous agent powered by OpenRouter (configurable with an OpenAI-comp
 - Local task checkpoints and short-lived conversational context. Agent work automatically continues across up to three batches when it reaches `AGENT_MAX_STEPS`, with a maximum of 60 model steps per task.
 
 
+## Installable agent skills
+
+The owner can install skills from Telegram by sending a command such as:
+
+```text
+install this skill npx rea-agents setup
+install this skill npx skills add https://github.com/Leonxlnx/taste-skill --skill design-taste-frontend
+```
+
+The agent validates supported installer commands and asks for explicit owner approval before running them. It supports `npx rea-agents setup` and `npx skills add` from a GitHub repository, with optional `--skill` and `--agent` options. It does not support arbitrary shell commands through this feature.
+
+After installation, the agent discovers `SKILL.md` instructions in workspace skill directories such as `.agents/skills/`, `.claude/skills/`, `.codex/skills/`, `.opencode/skills/`, and `skills/`, plus supported home-level skill directories. At the start of a task it provides the agent with a skill index; the agent can read the full instructions for relevant skills using `read_skill`. Third-party skill files are treated as untrusted guidance and cannot override the agent's security policy.
+
+Tools: `list_skills`, `read_skill`, and `install_skill`.
+
 ## Patchright browser backend
 
 Patchright is the agent's only browser automation backend. It is a Playwright-compatible, Chromium-focused alternative designed to reduce common automation-detection signals. The browser adapter runs Chromium locally inside the Box and does not require a hosted browser service or a separate browser daemon.
