@@ -13,6 +13,10 @@ Do not claim a test passed unless you actually ran it and saw a successful exit 
 Do not deploy, push commits to remotes, run destructive Git operations, delete user data, change credentials, make purchases, or perform other high-impact external actions. Explain the plan and request human approval instead. Do not attempt to bypass tool restrictions. Dependency installation and project scripts can execute third-party code; inspect package scripts and project context first.
 Keep updates concise. Prefer small, coherent changes. When finished, summarize what changed, checks run, and anything still blocked.`;
 
+function isSelfUpdateRequest(task) {
+  return /^\\s*(?:please\\s+)?(?:update|pull|sync|refresh)\\s+(?:yourself|the\\s+agent|this\\s+agent)\\b.*\\b(?:github|git\\s*hub)\\b\\s*[.!?]*\\s*$/i.test(task);
+}
+
 export async function runAgent(task, options = {}) {
   if (!task || !task.trim()) throw new Error("Provide a task after the command.");
   const profileName = options.profile || "general";
@@ -36,6 +40,34 @@ export async function runAgent(task, options = {}) {
     await fs.writeFile(checkpoint, JSON.stringify(record, null, 2), { mode: 0o600 });
   };
   await save();
+
+  // Repository-update requests are deterministic operations, not model-planning tasks.
+  // Route them directly so the model cannot substitute unrelated tools or edit files first.
+  if (isSelfUpdateRequest(task)) {
+    options.onProgress?.({ type: "model_start", step: 1, maxSteps: 1, message: "Running the GitHub updater directly." });
+    options.onProgress?.({ type: "tool_start", step: 1, maxSteps: 1, tool: "update_repository", message: "Using update repository." });
+    try {
+      const result = await executeTool("update_repository", {});
+      const answer = result?.updated
+        ? `Repository update completed on branch ${result.branch}.\\n${result.output || "Git pull completed."}\\nCurrent commit: ${result.currentCommit || "unknown"}. Restart the agent process to load the updated code.`
+        : "The repository updater returned without confirming an update.";
+      record.status = result?.updated ? "completed" : "failed";
+      record.answer = answer;
+      record.finishedAt = new Date().toISOString();
+      await save();
+      options.onProgress?.({ type: "tool_done", step: 1, maxSteps: 1, tool: "update_repository", message: result?.updated ? "Repository update completed." : "Repository update was not confirmed." });
+      return { answer, checkpoint, history: [...previousTurns, { role: "user", content: task.trim() }, { role: "assistant", content: answer }].slice(-20) };
+    } catch (error) {
+      const answer = `Repository update failed: ${error.message || "Unknown error"}`;
+      record.status = "failed";
+      record.error = error.message || "Unknown error";
+      record.answer = answer;
+      record.finishedAt = new Date().toISOString();
+      await save();
+      options.onProgress?.({ type: "tool_done", step: 1, maxSteps: 1, tool: "update_repository", message: "Repository update failed." });
+      return { answer, checkpoint, history: [...previousTurns, { role: "user", content: task.trim() }, { role: "assistant", content: answer }].slice(-20) };
+    }
+  }
 
   // AGENT_MAX_STEPS controls each work batch. If the task is still active at
   // a batch boundary, automatically continue from the saved tool results, up to
