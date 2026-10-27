@@ -168,7 +168,7 @@ export async function executeCamofoxTool(name, args) {
     const result = await request("GET", `/tabs/${encodeURIComponent(id)}/screenshot?userId=${encodeURIComponent(userId)}`);
     const encoded = result?.screenshot?.data || result?.screenshot || result?.data || result?.base64;
     if (typeof encoded !== "string") throw new Error("Camofox screenshot response did not contain base64 image data.");
-    const image = Buffer.from(encoded.replace(/^data:image\\/png;base64,/, ""), "base64");
+    const image = Buffer.from(encoded.replace("data:image/png;base64,", ""), "base64");
     if (image.length < 8 || image.subarray(0, 8).toString("hex") !== "89504e470d0a1a0a") {
       throw new Error("Camofox screenshot response was not a valid PNG image.");
     }
