@@ -4,6 +4,7 @@ import { config } from "./config.js";
 import { chatCompletion } from "./oxion.js";
 import { executeTool, toolDefinitions } from "./tools.js";
 import { loadProfile } from "./profiles.js";
+import { replyWithGpt5 } from "./gpt5.js";
 
 const SYSTEM_PROMPT = `You are Nabees Agent, a conversational autonomous assistant that can answer naturally and carry out multi-step tasks using its available tools.
 Plan internally, use tools when they materially help, inspect tool results, and continue until the task is done or you have a specific blocker.
@@ -17,7 +18,14 @@ function isSelfUpdateRequest(task) {
   return /^\s*(?:please\s+)?(?:update|pull|sync|refresh)\s+(?:yourself|the\s+agent|this\s+agent)\b.*\b(?:github|git\s*hub)\b\s*[.!?]*\s*$/i.test(task);
 }
 
-function simpleGreetingReply(task) {
+function isBasicChatMessage(task) {
+  const text = task.trim();
+  if (!text || text.length > 500) return false;
+  if (/^\/(?:task|agent|agents|status|help|start)\b/i.test(text)) return false;
+  return !/^(?:(?:please\s+)?(?:can|could|would)\s+you\s+)?(?:update|pull|sync|refresh|create|build|fix|edit|write|make|run|execute|install|deploy|search|find|open|download|send|generate|research|analy[sz]e|inspect|check|read|list|summari[sz]e|compare|convert|delete|remove|add|change|implement|test|commit|push|browse|fetch|scrape|code)\b/i.test(text);
+}
+
+function basicChatFallback(task) {
   const normalized = task.trim().replace(/[.!?,]+$/g, "").toLowerCase();
   if (/^(hi|hello|hey|hiya|good morning|good afternoon|good evening)$/.test(normalized)) {
     return "Hi! I'm Nabees Agent. What would you like me to help you with?";
@@ -52,20 +60,39 @@ export async function runAgent(task, options = {}) {
   };
   await save();
 
-  // Handle simple greetings and thanks locally so basic conversation still works
-  // when the configured AI provider is rate-limited or unavailable.
-  const localReply = simpleGreetingReply(task);
-  if (localReply) {
-    record.status = "completed";
-    record.answer = localReply;
-    record.finishedAt = new Date().toISOString();
-    await save();
-    return {
-      answer: localReply,
-      status: record.status,
-      checkpoint,
-      history: [...previousTurns, { role: "user", content: task.trim() }, { role: "assistant", content: localReply }].slice(-20)
-    };
+  // Ordinary conversation uses the previously shared GPT-5 ChatGPT client,
+  // not OpenRouter's tool-planning model. Tool-oriented requests continue below.
+  if (isBasicChatMessage(task)) {
+    options.onProgress?.({ type: "model_start", step: 1, maxSteps: 1, message: "Replying through the GPT-5 chat client." });
+    try {
+      const answer = await replyWithGpt5(task, previousTurns);
+      record.status = "completed";
+      record.answer = answer;
+      record.finishedAt = new Date().toISOString();
+      await save();
+      return {
+        answer,
+        status: record.status,
+        checkpoint,
+        history: [...previousTurns, { role: "user", content: task.trim() }, { role: "assistant", content: answer }].slice(-20)
+      };
+    } catch (error) {
+      const fallback = basicChatFallback(task);
+      const answer = fallback
+        ? `${fallback}\n\nGPT-5 chat is temporarily unavailable: ${error.message || "request failed"}`
+        : `GPT-5 chat failed: ${error.message || "request failed"}`;
+      record.status = fallback ? "completed" : "failed";
+      record.error = error.message || "GPT-5 chat request failed";
+      record.answer = answer;
+      record.finishedAt = new Date().toISOString();
+      await save();
+      return {
+        answer,
+        status: record.status,
+        checkpoint,
+        history: [...previousTurns, { role: "user", content: task.trim() }, { role: "assistant", content: answer }].slice(-20)
+      };
+    }
   }
 
   // Repository-update requests are deterministic operations, not model-planning tasks.
