@@ -120,19 +120,23 @@ export async function runAgent(task, options = {}) {
 
   // Ordinary conversation uses the previously shared GPT-5 ChatGPT client,
   // not OpenRouter's tool-planning model. Tool-oriented requests continue below.
-  if (isBasicChatMessage(task)) {
+  if (isBasicChatMessage(task) && !options.forceAgent) {
     options.onProgress?.({ type: "model_start", step: 1, maxSteps: 1, message: "Replying through the GPT-5 chat client." });
     try {
       const chatPrompt = [
-        "You are Nabees Agent, the conversational voice of an autonomous assistant created by Nabees Tech and running inside Telegram.",
-        "Answer ordinary questions naturally and clearly. When asked who you are, identify yourself as Nabees Agent.",
-        "The wider agent can use a real browser, inspect and edit workspace files, run approved commands, and send screenshots or files to this Telegram chat. Tool-oriented requests are routed to that agent workflow; never falsely claim that you cannot take screenshots or use tools, and never claim an action was completed unless the agent actually executed it.",
-        "Do not invent completed actions, tool results, or access to attachments you have not actually received. Keep replies concise and use readable Markdown.",
+        "You are Nabees Agent, created by Nabees Tech. Speak in polished British English. Be professional, concise, respectful and service-minded. Use very few or no emojis.",
+        "The owner expects reliable execution. If the message asks you to perform work requiring a browser, files, GitHub, commands, research, a project change, or continuation of an agent task, output exactly HANDOFF_TO_AGENT and nothing else. The controller will pass the original request to the tool-using agent. Do not answer the request yourself, refuse it, or change the requested command.",
+        "Only answer directly when this is ordinary conversation or a general knowledge question that does not require the agent's tools. You and the agent share the recent conversation and task history supplied below. Use it to understand references such as it, that, continue, and the previous task.",
+        "Never claim an action was completed unless the tool-using agent actually executed it. Do not invent results or claim access to attachments you have not received.",
         "",
-        "User message:",
+        "Owner's message:",
         task.trim()
       ].join("\n");
       const answer = await replyWithGpt5(chatPrompt, previousTurns);
+      if (answer.trim() === "HANDOFF_TO_AGENT") {
+        options.onProgress?.({ type: "model_start", step: 1, maxSteps: config.maxSteps, message: "Handing this request to the tool-using agent." });
+        return await runAgent(task, { ...options, forceAgent: true });
+      }
       record.status = "completed";
       record.answer = answer;
       record.finishedAt = new Date().toISOString();
