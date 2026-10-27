@@ -28,7 +28,7 @@ const isInception = provider === "inception" || provider === "inceptionlabs";
 
 export const config = {
   provider,
-  browserBackend: (process.env.BROWSER_BACKEND || "playwright").trim().toLowerCase(),
+  browserBackend: (process.env.BROWSER_BACKEND || "camofox").trim().toLowerCase(),
   camofoxBaseUrl: (process.env.CAMOFOX_BASE_URL || "http://127.0.0.1:9377").replace(/\/+$/, ""),
   camofoxAccessKey: process.env.CAMOFOX_ACCESS_KEY || "",
   apiKey: isInception
