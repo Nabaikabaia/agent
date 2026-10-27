@@ -24,8 +24,12 @@ globalThis.fetch = async (url, options = {}) => {
   if (parsed.pathname === "/tabs" && options.method === "POST") return jsonResponse({ tabId: "remote-1", url: "https://example.com", title: "Example" });
   if (parsed.pathname === "/tabs" && (!options.method || options.method === "GET")) return jsonResponse({ running: true, tabs: [{ tabId: "remote-1", url: "https://example.com", title: "Example" }] });
   if (parsed.pathname.endsWith("/snapshot")) return jsonResponse({ snapshot: "[button e1] Continue [textbox e2] Search", url: "https://example.com", title: "Example" });
-  if (parsed.pathname.endsWith("/screenshot")) return new Response(pngHeader, { status: 200, headers: { "content-type": "image/png" } });
+  if (parsed.pathname.endsWith("/screenshot")) return jsonResponse({ screenshot: { data: pngHeader.toString("base64"), mimeType: "image/png" } });
   if (parsed.pathname.endsWith("/downloads")) return jsonResponse({ downloads: [] });
+  if (parsed.pathname.endsWith("/evaluate")) return jsonResponse({ ok: true, result: { value: "ok" } });
+  if (parsed.pathname.endsWith("/forward") || parsed.pathname.endsWith("/refresh")) return jsonResponse({ ok: true, url: "https://example.com" });
+  if (parsed.pathname.endsWith("/links")) return jsonResponse({ links: [{ href: "https://example.com/a" }] });
+  if (parsed.pathname.endsWith("/images")) return jsonResponse({ images: [{ src: "https://example.com/a.png" }] });
   if (parsed.pathname.endsWith("/navigate")) return jsonResponse({ ok: true, url: "https://example.org", httpStatus: 200 });
   if (parsed.pathname.endsWith("/back")) return jsonResponse({ ok: true, url: "https://example.com" });
   if (parsed.pathname.endsWith("/click") || parsed.pathname.endsWith("/type") || parsed.pathname.endsWith("/wait") || parsed.pathname.endsWith("/scroll")) return jsonResponse({ ok: true });
@@ -65,6 +69,11 @@ test("Camofox adapter matches the documented HTTP contract", async () => {
   assert.equal(screenshotBytes.subarray(0, 8).toString("hex"), "89504e470d0a1a0a");
 
   assert.deepEqual(await executeCamofoxTool("browser_downloads", {}), [{ tab_id: opened.tab_id, downloads: [] }]);
+  assert.deepEqual((await executeCamofoxTool("browser_evaluate", { tab_id: opened.tab_id, script: "document.title" })).result, { value: "ok" });
+  assert.equal((await executeCamofoxTool("browser_links", { tab_id: opened.tab_id })).links.length, 1);
+  assert.equal((await executeCamofoxTool("browser_images", { tab_id: opened.tab_id })).images.length, 1);
+  await executeCamofoxTool("browser_forward", { tab_id: opened.tab_id });
+  await executeCamofoxTool("browser_refresh", { tab_id: opened.tab_id });
   await executeCamofoxTool("browser_back", { tab_id: opened.tab_id });
   await executeCamofoxTool("browser_close", { tab_id: opened.tab_id });
   await assert.rejects(() => executeCamofoxTool("browser_snapshot", { tab_id: opened.tab_id }), /Unknown Camofox tab/);
