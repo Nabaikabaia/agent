@@ -148,7 +148,7 @@ async function executeNpx(args) {
   const childEnv = { PATH: process.env.PATH || "", CI: "1", npm_config_audit: "false", npm_config_fund: "false" };
   for (const key of ["HOME", "TMPDIR", "TEMP", "TMP", "SYSTEMROOT", "WINDIR", "LANG", "LC_ALL"]) if (process.env[key]) childEnv[key] = process.env[key];
   return await new Promise((resolve, reject) => {
-    const child = spawn("npx", args.slice(1), { cwd: config.workspace, env: childEnv, shell: false, stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn("npx", ["--yes", ...args.slice(1)], { cwd: config.workspace, env: childEnv, shell: false, stdio: ["ignore", "pipe", "pipe"] });
     let stdout = "", stderr = "", timedOut = false;
     const collect = (target, chunk) => {
       const value = chunk.toString();
