@@ -22,7 +22,7 @@ function isBasicChatMessage(task) {
   const text = task.trim();
   if (!text || text.length > 500) return false;
   if (/^\/(?:task|agent|agents|status|help|start)\b/i.test(text)) return false;
-  return !/^(?:(?:please\s+)?(?:can|could|would)\s+you\s+)?(?:update|pull|sync|refresh|create|build|fix|edit|write|make|run|execute|install|deploy|search|find|open|download|send|generate|research|analy[sz]e|inspect|check|read|list|summari[sz]e|compare|convert|delete|remove|add|change|implement|test|commit|push|browse|fetch|scrape|code)\b/i.test(text);
+  return !/^(?:(?:please\s+)?(?:can|could|would)\s+you\s+)?(?:update|pull|sync|refresh|create|build|fix|edit|write|make|run|execute|install|deploy|search|find|open|download|send|generate|research|analy[sz]e|inspect|check|read|list|summari[sz]e|compare|convert|delete|remove|add|change|implement|test|commit|push|browse|fetch|scrape|code|review|investigate|continue|try|start|expand|apply|verify|debug)\b/i.test(text);
 }
 
 function basicChatFallback(task) {
