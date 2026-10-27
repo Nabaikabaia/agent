@@ -83,21 +83,29 @@ export async function executeCamofoxTool(name, args) {
 
   if (name === "browser_click") {
     const id = remoteId(args.tab_id);
-    const ref = args.selector || args.ref || args.name || args.text || args.label;
-    if (!ref) throw new Error("Provide a Camofox element ref (for example e1) or CSS selector in selector.");
+    const candidate = args.ref || args.selector || args.name || args.label || args.text;
+    if (!candidate) throw new Error("Provide a Camofox element ref from browser_snapshot (for example e1), or a CSS selector.");
+    const isElementRef = /^e\\d+$/.test(candidate);
+    if (!isElementRef && !args.selector) {
+      throw new Error("Camofox interactions use element refs from browser_snapshot (for example e1) or an explicit CSS selector. Take a fresh snapshot and pass its element ref.");
+    }
     const data = await request("POST", `/tabs/${encodeURIComponent(id)}/click`, {
-      userId, ...(args.selector ? { selector: args.selector } : { ref }), ...(args.wait_ms ? { waitMs: Math.min(5000, Number(args.wait_ms)) } : {})
+      userId, ...(isElementRef ? { ref: candidate } : { selector: args.selector }), ...(args.wait_ms ? { waitMs: Math.min(5000, Number(args.wait_ms)) } : {})
     });
     return tabResult(args.tab_id, { clicked: ref, details: data, browser: "camofox" });
   }
 
   if (name === "browser_type" || name === "browser_fill") {
     const id = remoteId(args.tab_id);
-    const ref = args.selector || args.ref || args.name || args.text || args.label || args.placeholder;
-    if (!ref) throw new Error("Provide a Camofox element ref (for example e1) or CSS selector in selector.");
+    const candidate = args.ref || args.selector || args.name || args.label || args.text || args.placeholder;
+    if (!candidate) throw new Error("Provide a Camofox element ref from browser_snapshot (for example e1), or a CSS selector.");
+    const isElementRef = /^e\\d+$/.test(candidate);
+    if (!isElementRef && !args.selector) {
+      throw new Error("Camofox interactions use element refs from browser_snapshot (for example e1) or an explicit CSS selector. Take a fresh snapshot and pass its element ref.");
+    }
     const value = String(name === "browser_fill" ? (args.value ?? "") : (args.text ?? ""));
     const data = await request("POST", `/tabs/${encodeURIComponent(id)}/type`, {
-      userId, ...(args.selector ? { selector: args.selector } : { ref }), text: value,
+      userId, ...(isElementRef ? { ref: candidate } : { selector: args.selector }), text: value,
       ...(args.press_enter ? { pressEnter: true } : {})
     });
     return tabResult(args.tab_id, { typed_characters: value.length, details: data, browser: "camofox" });
