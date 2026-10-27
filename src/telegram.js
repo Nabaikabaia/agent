@@ -288,35 +288,60 @@ function markdownToHtml(markdown) {
     .replace(/\x60([^\x60]+)\x60/g, "<code>$1</code>");
 
   const source = String(markdown ?? "").replace(/\r/g, "");
-  const blocks = source.split("\x60\x60\x60");
-  return blocks.map((block, index) => {
-    if (index % 2 === 1) {
-      const code = block.replace(/^\w+[+-]*\n/, "").replace(/^\n|\n$/g, "");
+  const chunks = source.split("\x60\x60\x60");
+  return chunks.map((chunk, chunkIndex) => {
+    if (chunkIndex % 2 === 1) {
+      const code = chunk.replace(/^[\w+-]*\n/, "").replace(/^\n|\n$/g, "");
       return "<pre>" + escapeHtml(code) + "</pre>";
     }
 
-    const lines = block.split("\n");
+    const lines = chunk.split("\n");
     const rendered = [];
     let paragraph = [];
     let list = [];
+
     const flushParagraph = () => {
       if (paragraph.length) {
-        rendered.push(inline(paragraph.join("\n")));
+        rendered.push(paragraph.map((line) => inline(line)).join("<br>"));
         paragraph = [];
       }
     };
     const flushList = () => {
       if (list.length) {
-        rendered.push(list.map((item) => "• " + inline(item)).join("\n"));
+        rendered.push(list.map((item) => "• " + inline(item)).join("<br>"));
         list = [];
       }
     };
+    const isTableSeparator = (line) => /^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(line);
+    const tableCells = (line) => line.trim().replace(/^\|/, "").replace(/\|$/, "").split("|").map((cell) => cell.trim());
 
-    for (const line of lines) {
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
       if (!line.trim()) {
         flushParagraph();
         flushList();
-        if (rendered.length && rendered[rendered.length - 1] !== "") rendered.push("");
+        continue;
+      }
+
+      // Render Markdown tables as readable label/value lines. Telegram rich
+      // messages do not reliably preserve table column alignment on phones.
+      if (line.includes("|") && i + 1 < lines.length && isTableSeparator(lines[i + 1])) {
+        flushParagraph();
+        flushList();
+        const headers = tableCells(line);
+        i += 2;
+        const rows = [];
+        while (i < lines.length && lines[i].trim() && lines[i].includes("|")) {
+          const cells = tableCells(lines[i]);
+          const label = inline(cells[0] || "");
+          const detail = cells.slice(1).map((cell, index) =>
+            (headers[index + 1] ? "<b>" + inline(headers[index + 1]) + ":</b> " : "") + inline(cell)
+          ).join(" ");
+          rows.push("• <b>" + label + "</b>" + (detail ? " — " + detail : ""));
+          i++;
+        }
+        rendered.push(rows.join("<br>"));
+        i--;
         continue;
       }
 
@@ -348,8 +373,8 @@ function markdownToHtml(markdown) {
 
     flushParagraph();
     flushList();
-    return rendered.join("\n").replace(/\n{3,}/g, "\n\n");
-  }).join("\n");
+    return rendered.join("<br><br>");
+  }).join("<br><br>");
 }
 
 function humanizeTool(name) {
