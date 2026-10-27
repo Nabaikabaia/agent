@@ -1,7 +1,9 @@
 import { spawn } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { setTimeout as delay } from "node:timers/promises";
 import { config } from "./config.js";
 
@@ -73,8 +75,9 @@ function childEnvironment(port, accessKey) {
 
 function launchService(port, accessKey) {
   const npmCommand = process.platform === "win32" ? "npx.cmd" : "npx";
+  const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
   const child = spawn(npmCommand, ["--yes", "@askjo/camofox-browser"], {
-    cwd: path.dirname(new URL(import.meta.url).pathname),
+    cwd: projectRoot,
     env: childEnvironment(port, accessKey),
     detached: process.platform !== "win32",
     stdio: ["ignore", "pipe", "pipe"],
@@ -127,9 +130,7 @@ async function startLocalService() {
 }
 
 function cryptoRandomKey() {
-  return [...crypto.getRandomValues(new Uint8Array(32))]
-    .map((byte) => byte.toString(16).padStart(2, "0"))
-    .join("");
+  return randomBytes(32).toString("hex");
 }
 
 export async function ensureCamofoxService() {
