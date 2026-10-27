@@ -21,7 +21,7 @@ Node.js autonomous agent powered by OpenRouter (configurable with an OpenAI-comp
 Requires Node.js 20+ and a running Box/workspace.
 
 1. Copy `.env.example` to `.env`.
-2. Create an API key at [OpenRouter](https://openrouter.ai/keys) and set `OPENROUTER_API_KEY` in `.env`. The default model is `nvidia/nemotron-3-ultra-550b-a55b:free`; free model availability and quotas can change. You can set `OPENROUTER_MODEL` to another model from the OpenRouter catalog.
+2. Create an API key at [OpenRouter](https://openrouter.ai/keys) and set `OPENROUTER_API_KEY` in `.env`. The default model is `nvidia/nemotron-3-ultra-550b-a55b:free`; free model availability and quotas can change. You can set `OPENROUTER_MODEL` to another model from the OpenRouter catalog. Slow models can use `AI_REQUEST_TIMEOUT_MS=300000` (5 minutes; maximum 600000 ms).
 3. Install dependencies and Chromium: `npm install` then `npm run browser:install`.
 4. Create a bot with Telegram **@BotFather** and find your numeric Telegram user ID.
 5. Set `TELEGRAM_BOT_TOKEN` and `TELEGRAM_OWNER_ID`.
@@ -36,7 +36,7 @@ npm run check
 npm run telegram
 ```
 
-Send `/start` to the bot, then chat normally. Telegram replies use Rich Messages with native buttons for Status, Help, and Profiles. During a task, the agent can also create custom choice buttons when it needs your decision; selecting one resumes the paused task. In groups, `/start` or `/help` posts a small menu; tapping its buttons returns an ephemeral response visible only to the person who tapped it. Task execution and profile switching remain restricted to the configured owner's private chat. Rich Messages require a Telegram Bot API server that supports them; if `sendRichMessage` is unavailable, the controller falls back to regular messages with inline callback buttons. During task execution, the `Task received` progress preview is sent as a temporary `sendRichMessageDraft` and refreshed while the task runs; the final answer or error is sent as a persistent rich message. Drafts require a compatible Bot API server; if draft support is missing, the agent continues without posting a permanent progress message. Ephemeral replies require a compatible Bot API server. Example tasks:
+Send `/start` to the bot, then chat normally. Telegram replies use Rich Messages with native buttons for Status, Help, and Profiles. During a task, the agent can also create custom choice buttons when it needs your decision; selecting one resumes the paused task. In groups, `/start` or `/help` posts a small menu; tapping its buttons returns an ephemeral response visible only to the person who tapped it. Task execution and profile switching remain restricted to the configured owner's private chat. Rich Messages require a Telegram Bot API server that supports them; if `sendRichMessage` is unavailable, the controller falls back to regular messages with inline callback buttons. During task execution, the controller maintains one Telegram progress message with an expandable blockquote containing the task, profile, and recent agent/tool steps. It edits that message as work proceeds, then sends the final answer separately. Set `AI_REQUEST_TIMEOUT_MS` in `.env` to change the AI provider request timeout (default 300000 ms / 5 minutes; allowed range 30 seconds–10 minutes). Ephemeral replies require a compatible Bot API server. Example tasks:
 
 - Inspect this project, install its dependencies, run its tests, and fix errors.
 - Research a library, read its documentation, inspect its GitHub repository, and assess whether it fits my project.
