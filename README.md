@@ -14,7 +14,7 @@ Node.js autonomous agent powered by OpenRouter (configurable with an OpenAI-comp
 - Owner-requested private-repository updates using `GITHUB_TOKEN`, with fixed-origin validation, a clean-working-tree check, and fast-forward-only pulls.
 - Project-local package installation with npm, pnpm, yarn, or bun.
 - Controlled one-command-at-a-time execution for development, tests, builds, and Git inspection.
-- Local task checkpoints and short-lived conversational context.
+- Local task checkpoints and short-lived conversational context. Agent work automatically continues across up to three batches when it reaches `AGENT_MAX_STEPS`, with a maximum of 60 model steps per task.
 
 ## Setup
 
@@ -42,7 +42,7 @@ Send `/start` to the bot, then chat normally. Telegram replies use Rich Messages
 - Research a library, read its documentation, inspect its GitHub repository, and assess whether it fits my project.
 - Clone my public repository into the workspace and explain its structure.
 
-The Telegram controller keeps up to 10 exchanges in memory; context resets when it restarts. Only one task runs at a time. Package installation requests pause until the configured owner taps **Approve** or **Reject**. Approval records are stored in `.agent-state/package-approvals.json`; expired, stale, or interrupted requests never install a package. If the process restarts, an in-flight task cannot resume automatically, so its pending request is marked interrupted and must be requested again.
+The Telegram controller keeps up to 10 exchanges in memory; context resets when it restarts. Only one task runs at a time. `AGENT_MAX_STEPS` sets the size of each model-step batch; if a task is still underway at a batch boundary, the agent automatically continues from the current tool results for up to three batches (maximum 60 model steps total). Package installation requests pause until the configured owner taps **Approve** or **Reject**. Approval records are stored in `.agent-state/package-approvals.json`; expired, stale, or interrupted requests never install a package. If the process restarts, an in-flight task cannot resume automatically, so its pending request is marked interrupted and must be requested again.
 
 ## Commands
 
