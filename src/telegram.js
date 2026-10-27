@@ -6,7 +6,7 @@ import { runAgent } from "./agent.js";
 import { listProfiles, loadProfile } from "./profiles.js";
 import { registerChoicePromptSender, resolveUserChoice } from "./interaction.js";
 import { initializePackageApprovals, registerPackageApprovalNotifier, decidePackageApproval } from "./approvals.js";
-import { registerTelegramPhotoSender } from "./tools.js";
+import { registerTelegramPhotoSender, registerTelegramDocumentSender } from "./tools.js";
 
 const API = () => `https://api.telegram.org/bot${config.telegramBotToken}`;
 const MAX_MESSAGE_LENGTH = 3900;
@@ -616,6 +616,32 @@ export async function startTelegramController() {
     }
     if (!response.ok || !data.ok) throw new Error(data.description || `Telegram sendPhoto failed (HTTP ${response.status}).`);
     return { sent: true, chat_id: config.telegramOwnerId, photo_id: data.result?.photo?.at(-1)?.file_id || null };
+  });
+
+  registerTelegramDocumentSender(async ({ filePath, caption }) => {
+    const bytes = await fs.readFile(filePath);
+    const form = new FormData();
+    form.append("chat_id", config.telegramOwnerId);
+    form.append("document", new Blob([bytes]), path.basename(filePath));
+    if (caption) form.append("caption", caption);
+    let response;
+    try {
+      response = await fetch(`${API()}/sendDocument`, { method: "POST", body: form, signal: AbortSignal.timeout(60_000) });
+    } catch (error) {
+      throw new Error(`Telegram sendDocument network request failed: ${describeError(error)}`, { cause: error });
+    }
+    const raw = await response.text();
+    let data;
+    try { data = JSON.parse(raw); } catch {
+      throw new Error(`Telegram sendDocument returned non-JSON (HTTP ${response.status}).`);
+    }
+    if (!response.ok || !data.ok) throw new Error(data.description || `Telegram sendDocument failed (HTTP ${response.status}).`);
+    return {
+      sent: true,
+      chat_id: config.telegramOwnerId,
+      file_name: path.basename(filePath),
+      document_id: data.result?.document?.file_id || null
+    };
   });
 
   registerChoicePromptSender(async ({ id, prompt, choices }) => {
