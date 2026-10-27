@@ -18,12 +18,12 @@ loadEnvFile();
 const workspace = path.resolve(process.env.AGENT_WORKSPACE || "./workspace");
 
 export const config = {
-  apiKey: process.env.OXION_API_KEY || "",
+  apiKey: process.env.OPENROUTER_API_KEY || process.env.AI_API_KEY || process.env.OXION_API_KEY || "",
   telegramBotToken: process.env.TELEGRAM_BOT_TOKEN || "",
   telegramOwnerId: process.env.TELEGRAM_OWNER_ID || "",
   githubToken: process.env.GITHUB_TOKEN || "",
-  baseUrl: (process.env.OXION_BASE_URL || "https://www.oxionai.com/v1").replace(/\/+$/, ""),
-  model: process.env.OXION_MODEL || "deepseek-v4-flash-0731",
+  baseUrl: (process.env.OPENROUTER_BASE_URL || process.env.AI_BASE_URL || process.env.OXION_BASE_URL || "https://openrouter.ai/api/v1").replace(/\/+$/, ""),
+  model: process.env.OPENROUTER_MODEL || process.env.AI_MODEL || process.env.OXION_MODEL || "nvidia/nemotron-3-ultra:free",
   workspace,
   stateDir: path.resolve(".agent-state"),
   agentsDir: path.resolve(process.env.AGENT_PROFILES_DIR || "./agents"),
@@ -31,6 +31,6 @@ export const config = {
 };
 
 export function validateConfig() {
-  if (!config.apiKey) throw new Error("Missing OXION_API_KEY. Copy .env.example to .env and add your key.");
-  if (!/^https:\/\//i.test(config.baseUrl)) throw new Error("OXION_BASE_URL must use HTTPS.");
+  if (!config.apiKey) throw new Error("Missing API key. Set OPENROUTER_API_KEY in .env (see .env.example).");
+  if (!/^https:\/\//i.test(config.baseUrl)) throw new Error("AI API base URL must use HTTPS.");
 }
