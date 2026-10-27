@@ -259,6 +259,14 @@ async function sendRich(chatId, text, buttons = [], options = {}) {
   }
 }
 
+async function sendRichDraft(chatId, draftId, text) {
+  return telegram("sendRichMessageDraft", {
+    chat_id: chatId,
+    draft_id: draftId,
+    rich_message: richContent(text)
+  });
+}
+
 async function sendText(chatId, text, replyToMessageId) {
   const chunks = [];
   let remaining = String(text || "");
@@ -534,16 +542,36 @@ async function handleMessage(message) {
   }
 
   activeTask = { task, profile: selectedProfile, startedAt: new Date().toISOString() };
-  await sendRich(chatId, `**Task received**\n\nProfile: ${selectedProfile}\nWorking on it now.\n\n${task.slice(0, 700)}`);
+  const draftId = Math.max(1, Date.now() % 2147483647);
+  const progressDraft = `**Task received**\n\nProfile: ${selectedProfile}\nWorking on it now.\n\n${task.slice(0, 700)}`;
+  let draftTimer = null;
   try {
+    // Keep transient progress in Telegram's live rich-draft UI, not as a permanent chat message.
+    try {
+      await sendRichDraft(chatId, draftId, progressDraft);
+      draftTimer = setInterval(() => {
+        void sendRichDraft(chatId, draftId, progressDraft).catch((error) => {
+          console.warn("Telegram draft refresh failed:", describeError(error));
+        });
+      }, 12_000);
+    } catch (error) {
+      // Draft support may vary by Bot API server. Never turn this status into a real message.
+      console.warn("Telegram rich drafts unavailable; continuing without a progress preview:", describeError(error));
+    }
+
     const result = await runAgent(task, { profile: activeTask.profile, history: conversationHistory });
     if (Array.isArray(result.history)) conversationHistory = result.history;
+    if (draftTimer) clearInterval(draftTimer);
+    draftTimer = null;
     await sendRich(chatId, `**Task finished**\n\n${result.answer}\n\n---\nCheckpoint: ${result.checkpoint}`, menuButtons());
   } catch (error) {
     console.error("Agent task execution failed:", describeError(error));
     if (error?.stack) console.error(error.stack);
+    if (draftTimer) clearInterval(draftTimer);
+    draftTimer = null;
     await sendRich(chatId, `**Task failed**\n\n${error.message || "Unknown error"}`, menuButtons());
   } finally {
+    if (draftTimer) clearInterval(draftTimer);
     activeTask = null;
   }
 }
