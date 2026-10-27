@@ -132,6 +132,7 @@ async function downloadTelegramAttachment(message) {
   const bytes = Buffer.from(await response.arrayBuffer());
   if (bytes.length > MAX_TELEGRAM_DOWNLOAD_BYTES) throw new Error("Telegram file downloads are limited to 20 MB. Please send a smaller file.");
 
+  await fs.mkdir(config.workspace, { recursive: true, mode: 0o700 });
   const workspace = await fs.realpath(config.workspace);
   const inbox = path.join(workspace, "inbox");
   await fs.mkdir(inbox, { recursive: true, mode: 0o700 });
@@ -675,6 +676,7 @@ Active profile: **${selectedProfile}**
 - /agent <name> — switch agent profile
 - /agents — list profiles
 - /task <task> — explicitly submit a task
+- Send a file in this private chat to upload and analyse it (up to 20 MB)
 - /status — check progress
 - /help — show commands
 
