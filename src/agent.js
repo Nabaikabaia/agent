@@ -6,7 +6,7 @@ import { executeTool, toolDefinitions } from "./tools.js";
 import { loadProfile } from "./profiles.js";
 import { replyWithGpt5 } from "./gpt5.js";
 
-const SYSTEM_PROMPT = \`You are Nabees Agent, created by Nabees Tech. You are the owner's capable, professional executive assistant and autonomous operator. Use polished British English spelling and phrasing. Be calm, concise, respectful and responsive; keep a deferential service tone without flattery, grovelling, or theatrical claims of ownership. Use no emojis unless the owner explicitly asks for them.
+const SYSTEM_PROMPT = `You are Nabees Agent, created by Nabees Tech. You are the owner's capable, professional executive assistant and autonomous operator. Use polished British English spelling and phrasing. Be calm, concise, respectful and responsive; keep a deferential service tone without flattery, grovelling, or theatrical claims of ownership. Use no emojis unless the owner explicitly asks for them.
 
 The owner expects execution, not excuses. When a request requires an action and an available tool can perform it, use the agent tools and carry it through rather than answering as though you are only a chatbot. Never claim that you cannot do something before checking the tools available to you. If a tool fails, report the actual blocker plainly and, where possible, try a sensible alternative.
 
@@ -18,7 +18,7 @@ Shared memory: read the recent conversation and previous task results included i
 
 Approval boundary: before deleting a file, overwriting an existing file, changing server processes, or taking another destructive or high-impact action, use the approval button workflow and wait for the owner's explicit approval. If approval is declined or times out, do not perform the action. Never treat silence as approval. Package installation also requires approval. Do not deploy, push commits to remotes, run destructive Git operations, change credentials, make purchases, or perform other high-impact external actions without explicit approval. Do not bypass tool restrictions.
 
-Never reveal environment variables, API keys, tokens, or secrets. Do not claim a test passed unless you actually ran it and saw a successful exit code. Keep progress concise. When finished, summarise what changed, the checks actually run, and anything still blocked.\`;
+Never reveal environment variables, API keys, tokens, or secrets. Do not claim a test passed unless you actually ran it and saw a successful exit code. Keep progress concise. When finished, summarise what changed, the checks actually run, and anything still blocked.`;
 
 function isSelfUpdateRequest(task) {
   return /^\s*(?:please\s+)?(?:update|pull|sync|refresh)\s+(?:yourself|the\s+agent|this\s+agent)\b.*\b(?:github|git\s*hub)\b\s*[.!?]*\s*$/i.test(task);
@@ -35,8 +35,7 @@ function isBasicChatMessage(task) {
   // Work requests go to the tool-using agent even when phrased as questions.
   const workIntent = /\b(?:screenshot|capture|browser|browse|visit|open|website|webpage|web page|https?:\/\/|google\.com|send me|send the|attach|download|upload|repository|repo|github|workspace|terminal|shell|command|script|execute|install|deploy|debug|inspect|edit|write|create|build|fix|run|search|research|fetch|scrape|test|commit|push|generate|analyse|analyze|check|read|list|summarise|summarize|compare|convert|delete|remove|add|change|implement|review|investigate|continue|resume|retry|try again|apply|verify|look into|take a look|carry out|handle|perform|update|pull|sync|refresh|restart|stop|start|overwrite|replace|modify|configure|set up|make|prepare|produce|process)\b/i;
   const contextualWork = /\b(?:this file|that file|the file|this repo|that repo|the repo|the website|that website|this website|the task|that task|previous task|previous request|what we discussed|as discussed|same thing|do it|go ahead|continue from|pick up where|the above|those changes|our project)\b/i;
-  const actionFraming = /^(?:(?:please\s+)?(?:can|could|would|will)\s+you\b|(?:i\s+)?(?:want|need)\s+you\s+to\b|(?:please\s+)?(?:help me|let's|lets)\b|(?:go ahead and|now)\b)/i;
-  if (workIntent.test(text) || contextualWork.test(text) || actionFraming.test(text)) return false;
+  if (workIntent.test(text) || contextualWork.test(text)) return false;
 
   return !/^(?:(?:please\s+)?(?:can|could|would|will)\s+you\s+)?(?:update|pull|sync|refresh|create|build|fix|edit|write|make|run|execute|install|deploy|search|find|open|download|send|generate|research|analyse|analyze|inspect|check|read|list|summarise|summarize|compare|convert|delete|remove|add|change|implement|test|commit|push|browse|fetch|scrape|code|review|investigate|continue|try|start|expand|apply|verify|debug|visit|capture|screenshot|restart|stop|overwrite|replace|modify|configure|prepare|process)\b/i.test(text);
 }
@@ -134,6 +133,10 @@ export async function runAgent(task, options = {}) {
       ].join("\n");
       const answer = await replyWithGpt5(chatPrompt, previousTurns);
       if (answer.trim() === "HANDOFF_TO_AGENT") {
+        record.status = "delegated";
+        record.answer = "Request handed to the tool-using agent.";
+        record.finishedAt = new Date().toISOString();
+        await save();
         options.onProgress?.({ type: "model_start", step: 1, maxSteps: config.maxSteps, message: "Handing this request to the tool-using agent." });
         return await runAgent(task, { ...options, forceAgent: true });
       }
