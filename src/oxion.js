@@ -22,15 +22,15 @@ export async function chatCompletion(messages, tools) {
   try {
     data = JSON.parse(raw);
   } catch {
-    throw new Error(`Oxion returned non-JSON (HTTP ${response.status}). Check the API base URL and model.`);
+    throw new Error(`AI provider returned non-JSON (HTTP ${response.status}). Check the API base URL and model.`);
   }
 
   if (!response.ok) {
     const message = data?.error?.message || data?.message || `HTTP ${response.status}`;
-    throw new Error(`Oxion API error: ${message}`);
+    throw new Error(`AI provider API error: ${message}`);
   }
 
   const choice = data?.choices?.[0];
-  if (!choice?.message) throw new Error("Oxion response did not contain choices[0].message.");
+  if (!choice?.message) throw new Error("AI provider response did not contain choices[0].message.");
   return choice.message;
 }
