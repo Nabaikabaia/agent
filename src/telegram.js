@@ -341,24 +341,58 @@ function humanizeTool(name) {
     .replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
-function progressMessage(task, profile, events, state = "working", answer = "", checkpoint = "") {
-  const lines = events.slice(-10).map((event) => "• " + escapeHtml(event)).join("\n");
+function draftLabelForTask(task, event = "") {
+  const text = String(task || "").toLowerCase();
+  if (event) return event;
+  if (/\b(?:image|photo|picture|screenshot|screenshots)\b/.test(text)) return /\bscreenshot/.test(text) ? "Opening the website and capturing a screenshot…" : "Analyzing your image…";
+  if (/\b(?:voice|audio|transcri|listen)\b/.test(text)) return "Listening to the audio…";
+  if (/\b(?:pdf|document|attachment|file)\b/.test(text)) return "Reading your file…";
+  if (/\b(?:website|webpage|browser|browse|https?:\/\/|url)\b/.test(text)) return "Opening the website…";
+  if (/\b(?:code|repository|repo|github|script|debug|implement|build|deploy)\b/.test(text)) return "Working on your code…";
+  return "Thinking…";
+}
+
+function progressMessage(task, profile, events, state = "working", answer = "", checkpoint = "", buttons = []) {
   const details = [
-    "<b>Activity log</b>",
-    "<b>Profile:</b> " + escapeHtml(profile),
-    "<b>Request:</b> " + escapeHtml(String(task).slice(0, 500)),
-    "",
-    lines || "No additional activity recorded."
-  ];
-  if (checkpoint) details.push("", "<b>Saved log:</b> <code>" + escapeHtml(checkpoint) + "</code>");
+    "<details><summary>Activity log</summary>",
+    "<p><b>Profile:</b> " + escapeHtml(profile) + "</p>",
+    "<p><b>Request:</b> " + escapeHtml(String(task).slice(0, 500)) + "</p>",
+    "<ul>" + events.slice(-12).map((event) => "<li>" + escapeHtml(event) + "</li>").join("") + "</ul>",
+    checkpoint ? "<p><b>Saved log:</b> <code>" + escapeHtml(checkpoint) + "</code></p>" : "",
+    "</details>"
+  ].filter(Boolean).join("\n");
 
   if (state === "working") {
-    const current = events.at(-1) || "Working on your request…";
-    return "⏳ " + escapeHtml(current) + "\n<blockquote expandable>" + details.join("\n") + "</blockquote>";
+    return "<tg-thinking>" + escapeHtml(draftLabelForTask(task, events.at(-1))) + "</tg-thinking>";
   }
-  const heading = state === "done" ? "" : "<b>I couldn't complete that request.</b>\n\n";
-  const main = heading + markdownToHtml(answer || "No response was returned.");
-  return main + "\n\n<blockquote expandable>" + details.join("\n") + "</blockquote>";
+
+  const buttonHtml = buttons.length
+    ? "\n<tg-button-row align=\"left\">" + buttons.map((button, index) => {
+        const style = index === 0 ? "primary" : "success";
+        return "<tg-button type=\"callback_data\" style=\"" + style + "\" data=\"" + escapeHtml(button.data) + "\">" + escapeHtml(button.text) + "</tg-button>";
+      }).join("") + "</tg-button-row>"
+    : "";
+  const body = state === "failed"
+    ? "<h3>I couldn’t complete that request</h3>\n" + markdownToHtml(answer || "No response was returned.")
+    : markdownToHtml(answer || "No response was returned.");
+  // Details appear first and remain collapsed until tapped; the answer stays clean.
+  return details + "\n" + body + buttonHtml;
+}
+
+async function sendRichDraft(chatId, draftId, html) {
+  return telegram("sendRichMessageDraft", {
+    chat_id: chatId,
+    draft_id: draftId,
+    rich_message: { html: String(html || "<tg-thinking>Thinking…</tg-thinking>").slice(0, 28000) },
+    can_stop: true
+  });
+}
+
+async function sendRichHtml(chatId, html) {
+  return telegram("sendRichMessage", {
+    chat_id: chatId,
+    rich_message: { html: String(html || "&nbsp;").slice(0, 28000) }
+  });
 }
 
 function suggestFollowups(task, answer) {
@@ -591,7 +625,7 @@ async function handleCallback(callback) {
       from: callback.from,
       text: "/task " + followupTask,
       message_id: callback.message?.message_id
-    }, { messageId: callback.message?.message_id });
+    });
     return;
   }
 
@@ -728,66 +762,64 @@ async function handleMessage(message, taskOptions = {}) {
 
   activeTask = { task, profile: selectedProfile, startedAt: new Date().toISOString() };
   const progressEvents = ["Request received."];
-  let progressMessageId = taskOptions.messageId || null;
+  const draftId = Math.max(1, Date.now() % 2147483647);
   let progressTimer = null;
-  let progressEditBusy = false;
-  const refreshProgress = async (state = "working", answer = "", checkpoint = "", buttons = []) => {
-    while (progressEditBusy) {
-      await new Promise((resolve) => setTimeout(resolve, 40));
+  let draftUpdateBusy = false;
+  let draftAvailable = false;
+  const updateDraft = async (eventText = "") => {
+    if (eventText) {
+      progressEvents.push(eventText);
+      if (progressEvents.length > 30) progressEvents.splice(0, progressEvents.length - 30);
     }
-    progressEditBusy = true;
+    if (draftUpdateBusy) return;
+    draftUpdateBusy = true;
     try {
-      const text = progressMessage(task, activeTask?.profile || selectedProfile, progressEvents, state, answer, checkpoint);
-      if (progressMessageId) await editProgressMessage(chatId, progressMessageId, text, buttons);
-      else {
-        const sent = await sendProgressMessage(chatId, text);
-        progressMessageId = sent?.message_id || null;
-      }
+      await sendRichDraft(chatId, draftId, "<tg-thinking>" + escapeHtml(draftLabelForTask(task, eventText || progressEvents.at(-1))) + "</tg-thinking>");
+      draftAvailable = true;
     } catch (error) {
-      console.warn("Telegram progress message update failed:", describeError(error));
+      if (draftAvailable) console.warn("Telegram rich draft update failed:", describeError(error));
+      draftAvailable = false;
     } finally {
-      progressEditBusy = false;
+      draftUpdateBusy = false;
     }
   };
+
   try {
-    await refreshProgress();
-    progressTimer = setInterval(() => { void refreshProgress(); }, 4_000);
+    await updateDraft(draftLabelForTask(task));
+    progressTimer = setInterval(() => { void updateDraft(); }, 5_000);
     const result = await runAgent(task, {
       profile: activeTask.profile,
       history: conversationHistory,
       onProgress: (event) => {
-        if (event.type === "tool_start") {
-          progressEvents.push(event.message || ("Working with " + humanizeTool(event.tool)));
+        if (event.type === "tool_start" || event.type === "model_start") {
+          void updateDraft(event.message || draftLabelForTask(task));
         } else if (event.type === "tool_done") {
-          progressEvents.push(event.message || (humanizeTool(event.tool) + " finished."));
+          void updateDraft(event.message || (humanizeTool(event.tool) + " finished."));
         } else if (event.type === "continuation") {
-          progressEvents.push("Continuing with the remaining work.");
+          void updateDraft("Continuing with the remaining work…");
         }
-        if (progressEvents.length > 30) progressEvents.splice(0, progressEvents.length - 30);
       }
     });
     if (Array.isArray(result.history)) conversationHistory = result.history;
     if (progressTimer) clearInterval(progressTimer);
     progressTimer = null;
 
-    // Keep the answer and expandable activity log in the same Telegram message.
-    // Only offer follow-ups when the content suggests useful next actions.
     if (result.status === "failed" || result.status === "step_limit") {
       progressEvents.push(result.status === "step_limit" ? "Work paused at the execution limit." : "The request ended with an error.");
-      await refreshProgress("failed", result.answer, result.checkpoint);
+      await sendRichHtml(chatId, progressMessage(task, activeTask.profile, progressEvents, "failed", result.answer, result.checkpoint));
       return;
     }
 
     progressEvents.push("Finished.");
     const followupButtons = createFollowupButtons(task, result.answer);
-    await refreshProgress("done", result.answer, result.checkpoint, followupButtons);
+    await sendRichHtml(chatId, progressMessage(task, activeTask.profile, progressEvents, "done", result.answer, result.checkpoint, followupButtons));
   } catch (error) {
     console.error("Agent task execution failed:", describeError(error));
     if (error?.stack) console.error(error.stack);
     if (progressTimer) clearInterval(progressTimer);
     progressTimer = null;
     progressEvents.push("The request ended with an error.");
-    await refreshProgress("failed", error.message || "Unknown error");
+    await sendRichHtml(chatId, progressMessage(task, activeTask.profile, progressEvents, "failed", error.message || "Unknown error"));
   } finally {
     if (progressTimer) clearInterval(progressTimer);
     activeTask = null;
