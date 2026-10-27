@@ -20,6 +20,66 @@ Approval boundary: before deleting a file, overwriting an existing file, changin
 
 Response style: keep every user-facing reply concise, clearly arranged, and easy to scan. Lead with the outcome, then use a short paragraph or up to 3–5 bullets. Avoid bulky narration, repeated context, unnecessary headings, and long explanations unless requested. Use natural British English, professional and respectfully deferential phrasing, and no emojis unless explicitly requested. Never reveal environment variables, API keys, tokens, or secrets. Do not claim a test passed unless you actually ran it and saw a successful exit code. Keep progress concise. When finished, summarise what changed, checks actually run, and anything still blocked.`;
 
+function redactActivity(value) {
+  return String(value ?? "")
+    .replace(/((?:token|password|passwd|secret|api[_-]?key|authorization)\s*[=:]\s*)[^\s,;]+/gi, "$1[REDACTED]")
+    .replace(/\b(?:gh[pousr]_[A-Za-z0-9_]{20,}|github_pat_[A-Za-z0-9_]+|sk-[A-Za-z0-9_-]{16,})\b/g, "[REDACTED]")
+    .slice(0, 220);
+}
+
+function toolActivity(name, args = {}, phase = "start", output = null) {
+  const command = name === "run_command" ? args.command : name === "run_check" ? args.command : null;
+  if (command) {
+    const safeCommand = redactActivity(command);
+    if (phase === "start") return "Executing command: " + safeCommand;
+    const result = output && typeof output === "object" ? output : {};
+    if (result.executed === false) return "Command not run (approval " + (result.approval || "not granted") + "): " + safeCommand;
+    if (result.timedOut) return "Command timed out: " + safeCommand;
+    if (result.exitCode !== undefined) return (result.exitCode === 0 ? "Command completed (exit 0): " : "Command failed (exit " + result.exitCode + "): ") + safeCommand;
+    if (result.error) return "Command failed: " + safeCommand + " — " + redactActivity(result.error);
+    return "Command process ended: " + safeCommand;
+  }
+  const targets = {
+    read_file: args.path && "Reading file: " + args.path,
+    write_file: args.path && "Writing file: " + args.path,
+    delete_file: args.path && "Deleting file: " + args.path,
+    list_files: "Listing files in: " + (args.path || "."),
+    web_search: args.query && "Searching the web for: " + args.query,
+    browse_url: args.url && "Fetching page: " + args.url,
+    github_api: args.path && "Requesting GitHub API: " + args.path,
+    browser_open: args.url && "Opening website: " + args.url,
+    browser_snapshot: "Inspecting the current browser page",
+    browser_screenshot: "Capturing a browser screenshot",
+    browser_click: "Clicking browser element: " + (args.selector || args.text || args.element || "specified target"),
+    browser_fill: "Filling browser field: " + (args.selector || args.label || "specified target"),
+    browser_type: "Typing into browser field: " + (args.selector || args.text || "specified target"),
+    browser_press: "Pressing browser key: " + (args.key || "specified key"),
+    browser_select: "Selecting browser option: " + (args.selector || args.label || "specified target"),
+    browser_scroll: "Scrolling the browser page",
+    browser_upload: args.path && "Uploading file in browser: " + args.path,
+    browser_back: "Navigating back in the browser",
+    browser_close: "Closing browser tab: " + (args.tab_id || "current tab"),
+    browser_downloads: "Checking browser downloads",
+    send_telegram_photo: args.path && "Sending photo to Telegram: " + args.path,
+    send_telegram_document: args.path && "Sending document to Telegram: " + args.path,
+    install_package: args.package && "Installing package: " + args.manager + " " + args.package,
+    update_repository: "Updating repository with a fast-forward-only Git pull"
+  };
+  const label = targets[name] || ("Running " + String(name || "agent tool").replace(/_/g, " "));
+  if (phase === "start") return redactActivity(label);
+  if (output && typeof output === "object") {
+    if (output.error) return redactActivity(label + " — failed: " + output.error);
+    if (output.written) return "Wrote file: " + redactActivity(output.written);
+    if (output.deleted) return "Deleted file: " + redactActivity(output.path || args.path);
+    if (output.stdout && /^(?:run_command|run_check)$/.test(name)) return redactActivity(label + " — process output received");
+    if (output.exitCode !== undefined) return redactActivity(label + (output.exitCode === 0 ? " — completed (exit 0)" : " — failed (exit " + output.exitCode + ")"));
+    if (output.url && name === "browser_open") return "Opened website: " + redactActivity(output.title || output.url);
+    if (output.file && name === "browser_screenshot") return "Screenshot saved: " + redactActivity(output.file);
+    if (output.approval && output.executed === false) return redactActivity(label + " — not run; approval " + output.approval);
+  }
+  return redactActivity(label + (phase === "done" ? " — finished" : ""));
+}
+
 function isSelfUpdateRequest(task) {
   return /^\s*(?:please\s+)?(?:update|pull|sync|refresh)\s+(?:yourself|the\s+agent|this\s+agent)\b.*\b(?:github|git\s*hub)\b\s*[.!?]*\s*$/i.test(task);
 }
@@ -230,14 +290,15 @@ export async function runAgent(task, options = {}) {
 
       for (const call of calls) {
         const name = call.function?.name || "unknown_tool";
-        options.onProgress?.({ type: "tool_start", step, maxSteps: maxTotalSteps, tool: name, message: `Using ${name.replace(/_/g, " ")}.` });
         let args;
         try {
           args = JSON.parse(call.function?.arguments || "{}");
         } catch {
+          options.onProgress?.({ type: "tool_start", step, maxSteps: maxTotalSteps, tool: name, message: "Could not parse arguments for " + name.replace(/_/g, " ") + "." });
           messages.push({ role: "tool", tool_call_id: call.id, content: "Tool error: arguments were not valid JSON." });
           continue;
         }
+        options.onProgress?.({ type: "tool_start", step, maxSteps: maxTotalSteps, tool: name, message: toolActivity(name, args, "start") });
         let output;
         try {
           output = await executeTool(name, args);
@@ -251,7 +312,7 @@ export async function runAgent(task, options = {}) {
           content: serialized.length > 20_000 ? serialized.slice(0, 20_000) + "\n[output truncated]" : serialized
         });
         await save();
-        options.onProgress?.({ type: "tool_done", step, maxSteps: maxTotalSteps, tool: name, message: `Finished ${name.replace(/_/g, " ")}.` });
+        options.onProgress?.({ type: "tool_done", step, maxSteps: maxTotalSteps, tool: name, message: toolActivity(name, args, "done", output) });
       }
 
       if (step % batchSize === 0 && step < maxTotalSteps) {
