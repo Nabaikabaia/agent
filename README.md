@@ -20,7 +20,7 @@ Node.js autonomous agent powered by OpenRouter (configurable with an OpenAI-comp
 Requires Node.js 20+ and a running Box/workspace.
 
 1. Copy `.env.example` to `.env`.
-2. Create an API key at [OpenRouter](https://openrouter.ai/keys) and set `OPENROUTER_API_KEY` in `.env`. The default model is `nvidia/nemotron-3-ultra:free`; free model availability and quotas can change. You can set `OPENROUTER_MODEL` to another model from the OpenRouter catalog.
+2. Create an API key at [OpenRouter](https://openrouter.ai/keys) and set `OPENROUTER_API_KEY` in `.env`. The default model is `nvidia/nemotron-3-ultra-550b-a55b:free`; free model availability and quotas can change. You can set `OPENROUTER_MODEL` to another model from the OpenRouter catalog.
 3. Install dependencies and Chromium: `npm install` then `npm run browser:install`.
 4. Create a bot with Telegram **@BotFather** and find your numeric Telegram user ID.
 5. Set `TELEGRAM_BOT_TOKEN` and `TELEGRAM_OWNER_ID`.
