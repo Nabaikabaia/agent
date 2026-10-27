@@ -11,6 +11,7 @@ Node.js autonomous agent powered by OpenRouter (configurable with an OpenAI-comp
 - Real Playwright Chromium browser: JavaScript-rendered pages, multiple isolated tabs, DOM snapshots, clicks, form filling, keyboard input, selects, scrolling, condition-based waits, workspace file uploads, page-context JavaScript, screenshots, and downloads.
 - Browser downloads and screenshots saved under the configured workspace, with a Telegram photo-delivery tool for sending supported images to the configured owner.
 - GitHub REST API access for repositories, contents, commits, issues, pull requests, releases, and search.
+- Owner-requested private-repository updates using `GITHUB_TOKEN`, with fixed-origin validation, a clean-working-tree check, and fast-forward-only pulls.
 - Project-local package installation with npm, pnpm, yarn, or bun.
 - Controlled one-command-at-a-time execution for development, tests, builds, and Git inspection.
 - Local task checkpoints and short-lived conversational context.
@@ -24,7 +25,7 @@ Requires Node.js 20+ and a running Box/workspace.
 3. Install dependencies and Chromium: `npm install` then `npm run browser:install`.
 4. Create a bot with Telegram **@BotFather** and find your numeric Telegram user ID.
 5. Set `TELEGRAM_BOT_TOKEN` and `TELEGRAM_OWNER_ID`.
-6. Optional: set `GITHUB_TOKEN` to a least-privilege token for private repositories and higher API limits. Public GitHub API access works without it.
+6. Optional: set `GITHUB_TOKEN` to a fine-grained token with **Contents: Read-only** access to `Nabaikabaia/agent` for private repository API access and authenticated updates. Public GitHub API access works without it. Keep the token only in `.env`.
 
 Never paste credentials into chat or commit `.env`.
 
@@ -59,6 +60,7 @@ The Telegram controller keeps up to 10 exchanges in memory; context resets when 
 - Playwright renders JavaScript-heavy pages and can interact with ordinary page controls. Screenshots are saved to disk and can be sent to the configured Telegram owner using `send_telegram_photo`; image-based reasoning depends on the configured model supporting vision, which is not assumed by this code.
 - Browser HTTP(S) requests to private/local network targets and metadata hosts are blocked by default. Do not enable local access except in a trusted development workflow.
 - GitHub API access supports public repository endpoints; private access needs `GITHUB_TOKEN`.
+- When the owner requests an agent update, `update_repository` uses `GITHUB_TOKEN` only for the fixed `https://github.com/Nabaikabaia/agent` origin. It refuses uncommitted local changes and uses `git pull --ff-only`; it does not configure a credential-bearing remote URL, print the token, or automatically update on every push. The workspace must already be a Git clone with that HTTPS origin.
 - Dependency installation and project scripts can execute third-party code. Inspect unfamiliar scripts and use a disposable, isolated container for untrusted code.
 - The agent must ask before deployment, remote pushes, destructive operations, credential changes, purchases, or other high-impact actions. It must not bypass CAPTCHAs or other anti-abuse/access-control protections. Tool restrictions are not a full OS sandbox.
 
