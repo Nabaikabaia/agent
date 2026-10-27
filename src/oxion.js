@@ -35,6 +35,9 @@ export async function chatCompletion(messages, tools) {
 
   if (!response.ok) {
     const message = data?.error?.message || data?.message || `HTTP ${response.status}`;
+    if (/free-models-per-day|free model.*(daily|day).*limit|daily.*free.*model.*limit/i.test(message)) {
+      throw new Error("OpenRouter's daily free-model quota is exhausted. Basic greetings and thanks are handled locally, but AI-powered tasks need the quota to reset or a different available model/provider configured in .env. Adding credits is optional; this code cannot reset the provider quota.");
+    }
     throw new Error(`AI provider API error: ${message}`);
   }
 
