@@ -46,7 +46,7 @@ export function validateConfig() {
     const variable = config.provider === "inception" || config.provider === "inceptionlabs"
       ? "INCEPTION_API_KEY"
       : "OPENROUTER_API_KEY";
-    throw new Error(\`Missing API key for provider "\${config.provider}". Set \${variable} in .env.\`);
+    throw new Error(`Missing API key for provider "${config.provider}". Set ${variable} in .env.`);
   }
   if (!/^https:\/\//i.test(config.baseUrl)) throw new Error("AI API base URL must use HTTPS.");
 }
