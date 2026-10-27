@@ -8,13 +8,34 @@ Node.js autonomous agent powered by OpenRouter (configurable with an OpenAI-comp
 - Dynamic in-message choice prompts: the agent can pause a task, ask the owner a question with 2–8 context-specific buttons, and continue using the selected answer. Prompts expire after a timeout.
 - Workspace file listing, reading, and writing.
 - Public web search and readable-page fetching.
-- Real Playwright Chromium browser: JavaScript-rendered pages, multiple isolated tabs, DOM snapshots, clicks, form filling, keyboard input, selects, scrolling, condition-based waits, workspace file uploads, page-context JavaScript, screenshots, and downloads.
+- Camofox/Camoufox is the default browser backend, with accessibility snapshots, element refs, JavaScript evaluation, form interaction, upload/download handling, screenshots, links, images, navigation history and tab management. Playwright Chromium remains available as an optional fallback.
 - Browser downloads and screenshots saved under the configured workspace, with Telegram photo delivery for screenshots and document delivery for downloadable files sent to the configured owner. Document delivery is limited to files in the configured workspace, blocks common secret/key files, and enforces a 45 MB limit.
 - GitHub REST API access for repositories, contents, commits, issues, pull requests, releases, and search.
 - Owner-requested private-repository updates using `GITHUB_TOKEN`, with fixed-origin validation, a clean-working-tree check, and fast-forward-only pulls.
 - Project-local package installation with npm, pnpm, yarn, or bun.
 - Controlled one-command-at-a-time execution for development, tests, builds, and Git inspection.
 - Local task checkpoints and short-lived conversational context. Agent work automatically continues across up to three batches when it reaches `AGENT_MAX_STEPS`, with a maximum of 60 model steps per task.
+
+
+## Optional Camofox browser backend
+
+Camofox runs as a separate browser service; this agent does not install or start the browser server automatically. Deploy `jo-inc/camofox-browser` separately, confirm its `/health` endpoint works, and keep it private or protect it with `CAMOFOX_ACCESS_KEY`.
+
+Add these variables to the agent's `.env` to configure the default Camofox browser:
+
+```dotenv
+BROWSER_BACKEND=camofox
+CAMOFOX_BASE_URL=http://127.0.0.1:9377
+# Optional, if the Camofox service has CAMOFOX_ACCESS_KEY enabled:
+CAMOFOX_ACCESS_KEY=your-service-access-key
+# Optional stable session identity:
+CAMOFOX_USER_ID=nabees-agent
+CAMOFOX_SESSION_KEY=telegram
+```
+
+If Camofox is on another host, set `CAMOFOX_BASE_URL` to its private service URL and enable the service's access key. Do not expose an unauthenticated browser-control API to the public internet. Set `BROWSER_BACKEND=playwright` only if you intentionally want to switch back to Playwright.
+
+The adapter supports opening/navigating/listing tabs, snapshots, click/type/press/scroll/wait, page-context JavaScript evaluation, native select changes, file upload, screenshots, links/images, downloads, back/forward, refresh, and close. Uploads require the agent and Camofox service to share a filesystem path inside Camofox's configured upload directory. Keep the Camofox API private or protected with an access key. Camofox may improve compatibility on some sites, but it is not guaranteed to pass every anti-bot challenge; the agent must not attempt to defeat access-control challenges.
 
 ## Chat providers
 
