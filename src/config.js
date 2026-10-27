@@ -1,18 +1,24 @@
 import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
-function loadEnvFile(file = path.resolve(".env")) {
+const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+
+function loadEnvFile(file = path.join(projectRoot, ".env")) {
   if (!fs.existsSync(file)) return;
   for (const line of fs.readFileSync(file, "utf8").split(/\r?\n/)) {
     const match = line.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)\s*$/);
-    if (!match || match[1] in process.env) continue;
+    if (!match) continue;
+    // A non-empty environment variable takes precedence, but empty PM2/shell
+    // values should not mask a populated value in the project's .env file.
+    if (process.env[match[1]] !== undefined && process.env[match[1]] !== "") continue;
     let value = match[2];
     if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) value = value.slice(1, -1);
     process.env[match[1]] = value;
   }
 }
 
-// Load local .env before reading any configuration values.
+// Load the project .env independently of the process working directory.
 loadEnvFile();
 
 const workspace = path.resolve(process.env.AGENT_WORKSPACE || "./workspace");
