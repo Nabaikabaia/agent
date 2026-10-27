@@ -1,5 +1,6 @@
 import path from "node:path";
 import fs from "node:fs/promises";
+import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { config, validateConfig } from "./config.js";
 import { runAgent } from "./agent.js";
@@ -78,6 +79,77 @@ async function telegram(method, payload = {}) {
     throw error;
   }
   return data.result;
+}
+
+const MAX_TELEGRAM_DOWNLOAD_BYTES = 20 * 1024 * 1024;
+
+function getTelegramAttachment(message) {
+  const candidates = [
+    ["document", message.document],
+    ["audio", message.audio],
+    ["video", message.video],
+    ["animation", message.animation],
+    ["voice", message.voice],
+    ["video_note", message.video_note],
+    ["sticker", message.sticker]
+  ];
+  for (const [kind, file] of candidates) {
+    if (file?.file_id) {
+      const fallbackExt = ({ audio: ".audio", video: ".mp4", animation: ".mp4", voice: ".ogg", video_note: ".mp4", sticker: file.is_video ? ".webm" : file.is_animated ? ".tgs" : ".webp" })[kind] || ".bin";
+      return { kind, fileId: file.file_id, fileName: file.file_name || (kind + fallbackExt), fileSize: file.file_size };
+    }
+  }
+  if (Array.isArray(message.photo) && message.photo.length) {
+    const photo = message.photo.reduce((largest, item) => (item.file_size || 0) > (largest.file_size || 0) ? item : largest);
+    return { kind: "photo", fileId: photo.file_id, fileName: "photo.jpg", fileSize: photo.file_size };
+  }
+  return null;
+}
+
+async function downloadTelegramAttachment(message) {
+  const attachment = getTelegramAttachment(message);
+  if (!attachment) return null;
+  if (attachment.fileSize && attachment.fileSize > MAX_TELEGRAM_DOWNLOAD_BYTES) {
+    throw new Error("Telegram file downloads are limited to 20 MB. Please send a smaller file.");
+  }
+  const fileInfo = await telegram("getFile", { file_id: attachment.fileId });
+  if (!fileInfo?.file_path) throw new Error("Telegram did not provide a download path for this attachment.");
+  if (fileInfo.file_size && fileInfo.file_size > MAX_TELEGRAM_DOWNLOAD_BYTES) {
+    throw new Error("Telegram file downloads are limited to 20 MB. Please send a smaller file.");
+  }
+  const encodedPath = fileInfo.file_path.split("/").map(encodeURIComponent).join("/");
+  let response;
+  try {
+    response = await fetch("https://api.telegram.org/file/bot" + config.telegramBotToken + "/" + encodedPath, {
+      signal: AbortSignal.timeout(60_000)
+    });
+  } catch (error) {
+    throw new Error("Telegram attachment download failed: " + describeError(error), { cause: error });
+  }
+  if (!response.ok) throw new Error("Telegram attachment download failed (HTTP " + response.status + ").");
+  const declaredLength = Number(response.headers.get("content-length") || 0);
+  if (declaredLength > MAX_TELEGRAM_DOWNLOAD_BYTES) throw new Error("Telegram file downloads are limited to 20 MB. Please send a smaller file.");
+  const bytes = Buffer.from(await response.arrayBuffer());
+  if (bytes.length > MAX_TELEGRAM_DOWNLOAD_BYTES) throw new Error("Telegram file downloads are limited to 20 MB. Please send a smaller file.");
+
+  const workspace = await fs.realpath(config.workspace);
+  const inbox = path.join(workspace, "inbox");
+  await fs.mkdir(inbox, { recursive: true, mode: 0o700 });
+  const realInbox = await fs.realpath(inbox);
+  if (realInbox !== workspace && !realInbox.startsWith(workspace + path.sep)) {
+    throw new Error("The upload inbox resolves outside the configured workspace and is blocked.");
+  }
+  const suppliedName = String(attachment.fileName || (attachment.kind + ".bin")).replace(/\\/g, "/").split("/").pop();
+  const safeName = suppliedName.replace(/[^a-zA-Z0-9._-]/g, "_").replace(/^\.+/, "").slice(-120) || "upload.bin";
+  const storedName = Date.now() + "-" + randomUUID().slice(0, 8) + "-" + safeName;
+  const absolutePath = path.join(realInbox, storedName);
+  await fs.writeFile(absolutePath, bytes, { mode: 0o600, flag: "wx" });
+  return {
+    kind: attachment.kind,
+    originalName: suppliedName,
+    relativePath: path.relative(workspace, absolutePath).split(path.sep).join("/"),
+    bytes: bytes.length
+  };
 }
 
 function inlineRichText(text) {
@@ -821,8 +893,24 @@ async function handleCallback(callback) {
 async function handleMessage(message, taskOptions = {}) {
   const chatId = message.chat?.id;
   const senderId = message.from?.id;
-  const text = message.text?.trim();
-  if (!chatId || !text) return;
+  let text = message.text?.trim();
+  if (!chatId) return;
+
+  if (!text && getTelegramAttachment(message)) {
+    // Only download owner uploads from the private chat; never let group members
+    // use the bot as a file-hosting proxy or fill the workspace inbox.
+    if (isGroup(message.chat) || !isOwner(senderId)) return;
+    if (activeTask) {
+      await sendRich(chatId, "A task is already running. Please wait for it to finish before sending a file.", menuButtons());
+      return;
+    }
+    const uploaded = await downloadTelegramAttachment(message);
+    if (!uploaded) return;
+    const caption = message.caption?.trim();
+    const instruction = caption || "Please inspect and analyse the uploaded file. Identify its format, extract and examine its contents using available tools, and give me a useful summary. If the format cannot be parsed with the available tools, explain the exact limitation rather than guessing.";
+    text = instruction + "\n\nUploaded file: " + uploaded.relativePath + "\nOriginal filename: " + uploaded.originalName + "\nFile type: " + uploaded.kind + "\nSize: " + uploaded.bytes + " bytes. The file is stored in the workspace; inspect it using the available file and command tools.";
+  }
+  if (!text) return;
 
   const command = text.match(/^\/(\w+)(?:@\w+)?(?:\s+([\s\S]*))?$/);
   const name = command?.[1]?.toLowerCase();
