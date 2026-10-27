@@ -253,7 +253,7 @@ async function updateRepository() {
 
   const git = (args, extraEnv = {}) => new Promise((resolve, reject) => {
     const child = spawn("git", args, {
-      cwd: config.workspace,
+      cwd: process.cwd(),
       env: { ...baseEnv, ...extraEnv },
       shell: false,
       stdio: ["ignore", "pipe", "pipe"]
