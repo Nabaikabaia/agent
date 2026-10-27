@@ -17,6 +17,17 @@ function isSelfUpdateRequest(task) {
   return /^\s*(?:please\s+)?(?:update|pull|sync|refresh)\s+(?:yourself|the\s+agent|this\s+agent)\b.*\b(?:github|git\s*hub)\b\s*[.!?]*\s*$/i.test(task);
 }
 
+function simpleGreetingReply(task) {
+  const normalized = task.trim().replace(/[.!?,]+$/g, "").toLowerCase();
+  if (/^(hi|hello|hey|hiya|good morning|good afternoon|good evening)$/.test(normalized)) {
+    return "Hi! I'm Nabees Agent. What would you like me to help you with?";
+  }
+  if (/^(thanks|thank you|thx|ty)$/.test(normalized)) {
+    return "You're welcome! What would you like to do next?";
+  }
+  return null;
+}
+
 export async function runAgent(task, options = {}) {
   if (!task || !task.trim()) throw new Error("Provide a task after the command.");
   const profileName = options.profile || "general";
@@ -41,6 +52,22 @@ export async function runAgent(task, options = {}) {
   };
   await save();
 
+  // Handle simple greetings and thanks locally so basic conversation still works
+  // when the configured AI provider is rate-limited or unavailable.
+  const localReply = simpleGreetingReply(task);
+  if (localReply) {
+    record.status = "completed";
+    record.answer = localReply;
+    record.finishedAt = new Date().toISOString();
+    await save();
+    return {
+      answer: localReply,
+      status: record.status,
+      checkpoint,
+      history: [...previousTurns, { role: "user", content: task.trim() }, { role: "assistant", content: localReply }].slice(-20)
+    };
+  }
+
   // Repository-update requests are deterministic operations, not model-planning tasks.
   // Route them directly so the model cannot substitute unrelated tools or edit files first.
   if (isSelfUpdateRequest(task)) {
@@ -56,7 +83,7 @@ export async function runAgent(task, options = {}) {
       record.finishedAt = new Date().toISOString();
       await save();
       options.onProgress?.({ type: "tool_done", step: 1, maxSteps: 1, tool: "update_repository", message: result?.updated ? "Repository update completed." : "Repository update was not confirmed." });
-      return { answer, checkpoint, history: [...previousTurns, { role: "user", content: task.trim() }, { role: "assistant", content: answer }].slice(-20) };
+      return { answer, status: record.status, checkpoint, history: [...previousTurns, { role: "user", content: task.trim() }, { role: "assistant", content: answer }].slice(-20) };
     } catch (error) {
       const answer = `Repository update failed: ${error.message || "Unknown error"}`;
       record.status = "failed";
