@@ -39,6 +39,7 @@ export async function runAgent(task, options = {}) {
 
   try {
     for (let step = 1; step <= config.maxSteps; step++) {
+      options.onProgress?.({ type: "model_start", step, maxSteps: config.maxSteps, message: "Thinking through the task and choosing the next action." });
       const message = await chatCompletion(messages, toolDefinitions);
       const assistantMessage = {
         role: "assistant",
@@ -59,7 +60,8 @@ export async function runAgent(task, options = {}) {
       }
 
       for (const call of calls) {
-        const name = call.function?.name;
+        const name = call.function?.name || "unknown_tool";
+        options.onProgress?.({ type: "tool_start", step, maxSteps: config.maxSteps, tool: name, message: `Using ${name.replace(/_/g, " ")}.` });
         let args;
         try {
           args = JSON.parse(call.function?.arguments || "{}");
@@ -80,6 +82,7 @@ export async function runAgent(task, options = {}) {
           content: serialized.length > 20_000 ? serialized.slice(0, 20_000) + "\n[output truncated]" : serialized
         });
         await save();
+        options.onProgress?.({ type: "tool_done", step, maxSteps: config.maxSteps, tool: name, message: `Finished ${name.replace(/_/g, " ")}.` });
       }
     }
 
