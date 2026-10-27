@@ -85,7 +85,7 @@ export async function executeCamofoxTool(name, args) {
     const id = remoteId(args.tab_id);
     const candidate = args.ref || args.selector || args.name || args.label || args.text;
     if (!candidate) throw new Error("Provide a Camofox element ref from browser_snapshot (for example e1), or a CSS selector.");
-    const isElementRef = /^e\\d+$/.test(candidate);
+    const isElementRef = /^e\d+$/.test(candidate);
     if (!isElementRef && !args.selector) {
       throw new Error("Camofox interactions use element refs from browser_snapshot (for example e1) or an explicit CSS selector. Take a fresh snapshot and pass its element ref.");
     }
@@ -99,7 +99,7 @@ export async function executeCamofoxTool(name, args) {
     const id = remoteId(args.tab_id);
     const candidate = args.ref || args.selector || args.name || args.label || args.text || args.placeholder;
     if (!candidate) throw new Error("Provide a Camofox element ref from browser_snapshot (for example e1), or a CSS selector.");
-    const isElementRef = /^e\\d+$/.test(candidate);
+    const isElementRef = /^e\d+$/.test(candidate);
     if (!isElementRef && !args.selector) {
       throw new Error("Camofox interactions use element refs from browser_snapshot (for example e1) or an explicit CSS selector. Take a fresh snapshot and pass its element ref.");
     }
