@@ -23,7 +23,7 @@ export const config = {
   telegramOwnerId: process.env.TELEGRAM_OWNER_ID || "",
   githubToken: process.env.GITHUB_TOKEN || "",
   baseUrl: (process.env.OPENROUTER_BASE_URL || process.env.AI_BASE_URL || process.env.OXION_BASE_URL || "https://openrouter.ai/api/v1").replace(/\/+$/, ""),
-  model: process.env.OPENROUTER_MODEL || process.env.AI_MODEL || process.env.OXION_MODEL || "nvidia/nemotron-3-ultra:free",
+  model: process.env.OPENROUTER_MODEL || process.env.AI_MODEL || process.env.OXION_MODEL || "nvidia/nemotron-3-ultra-550b-a55b:free",
   workspace,
   stateDir: path.resolve(".agent-state"),
   agentsDir: path.resolve(process.env.AGENT_PROFILES_DIR || "./agents"),
