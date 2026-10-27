@@ -256,17 +256,17 @@ export async function replyWithGpt5(text, history = []) {
   const input = String(text || "").trim();
   if (!input) throw new Error("A message is required.");
 
-  // Preserve recent context when the process has restarted and no in-memory
-  // conversation exists. Within a live conversation, the provider chat ID is
-  // used instead, avoiding repeatedly injecting the same transcript.
+  // Inject shared Telegram history on every call. The agent planner and this
+  // GPT chat adapter are separate providers, so GPT cannot infer task results
+  // from its own remote conversation alone.
   let prompt = input;
-  if (!conversationState && Array.isArray(history) && history.length) {
+  if (Array.isArray(history) && history.length) {
     const context = history
       .filter((item) => item && ["user", "assistant"].includes(item.role) && typeof item.content === "string")
-      .slice(-8)
+      .slice(-12)
       .map((item) => item.role + ": " + item.content)
       .join("\n");
-    if (context) prompt = "Recent conversation context:\n" + context + "\n\nNew message: " + input;
+    if (context) prompt = "Shared recent conversation and agent-task context:\n" + context + "\n\nCurrent owner message:\n" + input;
   }
 
   const result = await askNabeesAI(prompt, conversationState, {
