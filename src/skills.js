@@ -85,7 +85,9 @@ export async function readSkill(skillPath) {
   const available = await listSkills();
   const match = available.find(skill => skill.path === skillPath || skill.absolutePath === skillPath);
   if (!match) throw new Error("That path is not an installed skill. Run list_skills and use one of its exact paths.");
-  const content = await fs.readFile(match.absolutePath, "utf8");
+  const filePath = path.resolve(config.workspace, match.path);
+  const realFile = await fs.realpath(filePath);
+  const content = await fs.readFile(realFile, "utf8");
   return {
     name: match.name,
     path: match.path,
@@ -100,11 +102,11 @@ function parseCommand(command) {
   let current = "", quote = "", escaped = false, started = false;
   for (const char of command.trim()) {
     if (escaped) { current += char; escaped = false; started = true; continue; }
-    if (char === "\\\\" && quote !== "'") { escaped = true; started = true; continue; }
+    if (char === "\\" && quote !== "'") { escaped = true; started = true; continue; }
     if (quote) { if (char === quote) quote = ""; else current += char; started = true; continue; }
     if (char === "'" || char === '"') { quote = char; started = true; continue; }
-    if (/\\s/.test(char)) { if (started) { args.push(current); current = ""; started = false; } continue; }
-    if ("|;&<>\\n\\r".includes(char)) throw new Error("Shell operators, pipes, and redirections are not supported.");
+    if (/\s/.test(char)) { if (started) { args.push(current); current = ""; started = false; } continue; }
+    if ("|;&<>\n\r".includes(char)) throw new Error("Shell operators, pipes, and redirections are not supported.");
     current += char; started = true;
   }
   if (escaped || quote) throw new Error("Unclosed quote or escape in skill install command.");
