@@ -60,7 +60,7 @@ test("Camofox adapter matches the documented HTTP contract", async () => {
   assert.equal(tabs[0].tab_id, opened.tab_id);
 
   const screenshot = await executeCamofoxTool("browser_screenshot", { tab_id: opened.tab_id });
-  assert.match(screenshot.file, /^browser-screenshots\\/);
+  assert.ok(screenshot.file.startsWith("browser-screenshots" + path.sep));
   const screenshotBytes = await fs.readFile(path.join(workspace, screenshot.file));
   assert.equal(screenshotBytes.subarray(0, 8).toString("hex"), "89504e470d0a1a0a");
 
