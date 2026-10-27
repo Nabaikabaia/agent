@@ -597,6 +597,7 @@ async function handleMessage(message) {
         if (event.type === "model_start") progressEvents.push(`Step ${event.step}/${event.maxSteps}: reasoning and selecting the next action.`);
         else if (event.type === "tool_start") progressEvents.push(`Step ${event.step}/${event.maxSteps}: ${event.message}`);
         else if (event.type === "tool_done") progressEvents.push(event.message);
+        else if (event.type === "continuation") progressEvents.push(event.message);
         if (progressEvents.length > 20) progressEvents.splice(0, progressEvents.length - 20);
       }
     });
