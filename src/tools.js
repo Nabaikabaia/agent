@@ -100,6 +100,8 @@ export const toolDefinitions = [
   { type: "function", function: { name: "browser_refresh", description: "Reload the current browser tab.", parameters: { type: "object", properties: { tab_id: { type: "string" } }, required: ["tab_id"], additionalProperties: false } } },
   { type: "function", function: { name: "browser_links", description: "Extract the links currently present on a browser page.", parameters: { type: "object", properties: { tab_id: { type: "string" } }, required: ["tab_id"], additionalProperties: false } } },
   { type: "function", function: { name: "browser_images", description: "Extract image URLs and metadata from the current browser page.", parameters: { type: "object", properties: { tab_id: { type: "string" } }, required: ["tab_id"], additionalProperties: false } } },
+  { type: "function", function: { name: "browser_network", description: "Inspect captured browser network requests, responses, HTTP status codes, failures and optionally text/JSON response bodies. Sensitive headers are redacted. Use tab_id from browser_list_tabs.", parameters: { type: "object", properties: { tab_id: { type: "string" }, url_contains: { type: "string" }, method: { type: "string" }, status: { type: "integer" }, limit: { type: "integer", minimum: 1, maximum: 200 }, include_bodies: { type: "boolean" } }, required: ["tab_id"], additionalProperties: false } } },
+  { type: "function", function: { name: "browser_connect_external", description: "Connect to the separately installed Chrome/Chromium browser via its configured DevTools Protocol endpoint (BROWSER_CDP_URL), discover its open tabs, and enable network inspection. Requires BROWSER_CDP_URL in .env.", parameters: { type: "object", properties: {}, additionalProperties: false } } },
   { type: "function", function: { name: "browser_back", description: "Navigate the current tab back one history entry.", parameters: { type: "object", properties: { tab_id: { type: "string" } }, required: ["tab_id"], additionalProperties: false } } },
   { type: "function", function: { name: "browser_close", description: "Close a browser tab and its isolated browser context.", parameters: { type: "object", properties: { tab_id: { type: "string" } }, required: ["tab_id"], additionalProperties: false } } },
   { type: "function", function: { name: "browser_downloads", description: "List recent browser download events. Downloads are saved under workspace/browser-downloads.", parameters: { type: "object", properties: {}, additionalProperties: false } } },
@@ -461,6 +463,8 @@ export async function executeTool(name, args) {
     case "browser_back":
     case "browser_close":
     case "browser_downloads":
+    case "browser_network":
+    case "browser_connect_external":
       return await executeBrowserTool(name, args);
     default: throw new Error(`Unknown tool: ${name}`);
   }
