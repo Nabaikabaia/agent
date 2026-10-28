@@ -589,7 +589,7 @@ async function browserTurnstileDiagnostics(args) {
       const url = new URL(raw);
       const host = url.hostname.toLowerCase();
       const pathAndHost = host + url.pathname;
-      const looksTurnstile = /challenges\\.cloudflare\\.com|turnstile/i.test(pathAndHost);
+      const looksTurnstile = /challenges\.cloudflare\.com|turnstile/i.test(pathAndHost);
       for (const name of ["sitekey", "site_key", "render", "k"]) {
         const value = url.searchParams.get(name);
         if (value && (looksTurnstile || name === "sitekey" || name === "site_key")) {
@@ -615,7 +615,7 @@ async function browserTurnstileDiagnostics(args) {
     }
     for (const script of document.scripts) {
       const src = script.src || "";
-      if (/challenges\\.cloudflare\\.com\\/turnstile|turnstile/i.test(src)) {
+      if (/challenges\.cloudflare\.com\/turnstile|turnstile/i.test(src)) {
         try {
           const url = new URL(src, location.href);
           push(url.searchParams.get("render") || url.searchParams.get("sitekey"), "turnstile-script-url", url.origin + url.pathname + url.search);
@@ -624,8 +624,8 @@ async function browserTurnstileDiagnostics(args) {
       if (script.textContent && /turnstile|cf-turnstile/i.test(script.textContent)) {
         const text = script.textContent.slice(0, 250000);
         const patterns = [
-          /(?:sitekey|siteKey|site_key)\\s*[:=]\\s*["']([0-9a-zA-Z_-]{8,200})["']/g,
-          /turnstile\\.render\\s*\\([^,]+,\\s*\\{[\\s\\S]{0,1000}?sitekey\\s*:\\s*["']([0-9a-zA-Z_-]{8,200})["']/g
+          /(?:sitekey|siteKey|site_key)\s*[:=]\s*["']([0-9a-zA-Z_-]{8,200})["']/g,
+          /turnstile\.render\s*\([^,]+,\s*\{[\s\S]{0,1000}?sitekey\s*:\s*["']([0-9a-zA-Z_-]{8,200})["']/g
         ];
         for (const pattern of patterns) {
           let match, count = 0;
@@ -639,7 +639,7 @@ async function browserTurnstileDiagnostics(args) {
   return {
     tab_id: tab.id,
     url: page.url(),
-    turnstile_detected: candidates.size > 0 || tab.networkLog.some((entry) => /challenges\\.cloudflare\\.com\\/turnstile|turnstile/i.test(entry.url)),
+    turnstile_detected: candidates.size > 0 || tab.networkLog.some((entry) => /challenges\.cloudflare\.com\/turnstile|turnstile/i.test(entry.url)),
     candidates: [...candidates.values()],
     note: "Diagnostic only: site keys identify public widgets. This tool does not solve challenges, create response tokens, or submit/inject tokens."
   };
