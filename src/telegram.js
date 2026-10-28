@@ -8,7 +8,7 @@ import { replyWithGpt5 } from "./gpt5.js";
 import { listProfiles, loadProfile } from "./profiles.js";
 import { registerChoicePromptSender, resolveUserChoice } from "./interaction.js";
 import { initializePackageApprovals, registerPackageApprovalNotifier, decidePackageApproval } from "./approvals.js";
-import { registerTelegramPhotoSender, registerTelegramDocumentSender } from "./tools.js";
+import { executeTool, registerTelegramPhotoSender, registerTelegramDocumentSender } from "./tools.js";
 
 const API = () => `https://api.telegram.org/bot${config.telegramBotToken}`;
 const MAX_MESSAGE_LENGTH = 3900;
@@ -706,8 +706,11 @@ Active profile: **${selectedProfile}**
 
 - /agent <name> — switch agent profile
 - /agents — list profiles
-- /task <task> — explicitly submit a task
-- Send a file in this private chat to upload and analyse it (up to 20 MB)
+- /task <task> — start a task
+- /tasks — list running tasks and IDs
+- /kill <id> — stop a running task
+- /clearworkspace — clear workspace files (asks for confirmation)
+- Send a file here to analyse it
 - /status — check progress
 - /help — show commands
 
@@ -976,6 +979,33 @@ async function handleMessage(message, taskOptions = {}) {
     await sendRich(chatId, statusText(), menuButtons());
     return;
   }
+  if (name === "kill" || name === "killtask") {
+    if (!argument) {
+      await sendRich(chatId, "Sir, provide a task ID: /kill <id>\\nUse /tasks to see running task IDs.", menuButtons());
+      return;
+    }
+    const session = activeTasks.get(argument);
+    if (!session) {
+      await sendRich(chatId, "Sir, no running task was found with ID " + argument + ".", menuButtons());
+      return;
+    }
+    session.cancelRequested = true;
+    session.abortController?.abort();
+    await sendRich(chatId, "Sir, stop requested for task " + session.id + ". Any running shell command will be terminated; other tools will stop at their next cancellation checkpoint.", menuButtons());
+    return;
+  }
+  if (name === "clearworkspace" || name === "clearws") {
+    try {
+      const result = await executeTool("clear_workspace", {});
+      await sendRich(chatId, result.cleared
+        ? "Sir, workspace cleared. Removed " + result.removed_count + " item(s). Repository metadata, agent state, environment files, and credential files were preserved."
+        : "Sir, workspace was left unchanged (" + (result.approval || "cancelled") + ").", menuButtons());
+    } catch (error) {
+      console.error("[Nabees] Workspace clear failed:", error?.stack || error?.message);
+      await sendRich(chatId, "Sir, workspace clearing failed. The technical details are in the server log.", menuButtons());
+    }
+    return;
+  }
   if (name === "agents") {
     await sendRich(chatId, await profilesText(), menuButtons());
     return;
@@ -1014,7 +1044,9 @@ async function handleMessage(message, taskOptions = {}) {
     task,
     profile: selectedProfile,
     startedAt: new Date().toISOString(),
-    history: conversationHistory.slice(-20)
+    history: conversationHistory.slice(-20),
+    abortController: new AbortController(),
+    cancelRequested: false
   };
   activeTasks.set(session.id, session);
   activeTask = session;
@@ -1047,6 +1079,7 @@ async function handleMessage(message, taskOptions = {}) {
     const result = await runAgent(task, {
       profile: session.profile,
       history: session.history,
+      signal: session.abortController.signal,
       onProgress: (event) => {
         if (event.type === "tool_start" || event.type === "model_start") {
           void updateDraft(event.message || draftLabelForTask(task));
@@ -1063,8 +1096,13 @@ async function handleMessage(message, taskOptions = {}) {
     if (progressTimer) clearInterval(progressTimer);
     progressTimer = null;
 
+    if (result.status === "cancelled" || session.cancelRequested) {
+      progressEvents.push("Stopped by Sir.");
+      await sendRichHtml(chatId, progressMessage(task, session.profile, progressEvents, "failed", result.answer || "Sir, task stopped.", result.checkpoint));
+      return;
+    }
     if (result.status === "failed" || result.status === "step_limit") {
-      progressEvents.push(result.status === "step_limit" ? "Work paused at the execution limit." : "The request ended with an error.");
+      progressEvents.push(result.status === "step_limit" ? "Work paused at the execution limit." : "Execution needs attention.");
       await sendRichHtml(chatId, progressMessage(task, session.profile, progressEvents, "failed", result.answer, result.checkpoint));
       return;
     }
@@ -1077,8 +1115,8 @@ async function handleMessage(message, taskOptions = {}) {
     if (error?.stack) console.error(error.stack);
     if (progressTimer) clearInterval(progressTimer);
     progressTimer = null;
-    progressEvents.push("The request ended with an error.");
-    await sendRichHtml(chatId, progressMessage(task, session.profile, progressEvents, "failed", error.message || "Unknown error"));
+    progressEvents.push("Execution needs attention.");
+    await sendRichHtml(chatId, progressMessage(task, session.profile, progressEvents, "failed", "Sir, I hit an execution issue. The technical details are in the server log."));
   } finally {
     if (progressTimer) clearInterval(progressTimer);
     activeTasks.delete(session.id);
