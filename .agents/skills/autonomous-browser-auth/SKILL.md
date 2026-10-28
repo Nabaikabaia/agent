@@ -36,7 +36,9 @@ This skill is guidance for the browser tools already installed in Nabees. Do not
 - Reuse an authenticated tab when available. If the session appears expired, use the site's normal login flow.
 - Ask Sir for credentials or a one-time code only when genuinely required. Do not ask him to send passwords into public channels or save them in workspace files.
 - For email magic links or OTPs, use an inbox Sir has authorized and can access. Verify that the message and link belong to the expected service before opening them.
-- If the page presents CAPTCHA, Turnstile, bot checks, MFA, phone verification, or a full-page anti-bot challenge, do not forge, inject, source, or automate bypass tokens. Wait briefly for ordinary browser verification; if it remains, pause and ask Sir to complete the challenge in the browser or use the site's supported verification process.
+- If the page presents a CAPTCHA or verification challenge, first inspect the available tools and installed skills for a configured, supported solver integration. If one exists, the site permits its use, and the challenge type is supported, invoke that solver tool and follow its documented interface; do not invent solver commands, APIs, or parameters. Keep API keys in configured secrets/environment variables, never in prompts, source files, or progress messages.
+- A solver tool is not currently registered among this agent's built-in tools, so do not claim a solver is available merely because a skill mentions one. If no configured solver integration is found, wait briefly for ordinary browser verification and then ask Sir to complete the challenge through the site's normal verification flow.
+- Do not forge or inject challenge tokens, defeat Turnstile or other anti-bot protections, or use a solver to evade site restrictions, quotas, eligibility checks, or account protections. For MFA or phone verification, use the site's supported flow and ask Sir for the required action when needed.
 - Never describe a challenge as solved until the site visibly accepts it.
 
 ## Browser interaction rules
