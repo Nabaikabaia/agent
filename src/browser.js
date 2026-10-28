@@ -145,6 +145,22 @@ async function launchLocalBrowser() {
   try {
     return await chromium.launch(options);
   } catch (firstError) {
+    // A pinned executable is an explicit operator choice: never silently override it.
+    if (process.env.BROWSER_EXECUTABLE_PATH) throw firstError;
+
+    // If a detected system browser is incompatible, fall back to Patchright's managed build.
+    if (executablePath) {
+      try {
+        return await chromium.launch({ headless: true, args: options.args });
+      } catch (managedError) {
+        if (!missingBrowserBinary(managedError)) {
+          throw new Error(`System browser failed (${firstError.message}); managed Chromium also failed (${managedError.message}).`);
+        }
+        await installManagedChromium();
+        return await chromium.launch({ headless: true, args: options.args });
+      }
+    }
+
     if (!missingBrowserBinary(firstError)) throw firstError;
     await installManagedChromium();
     return await chromium.launch({ headless: true, args: options.args });
