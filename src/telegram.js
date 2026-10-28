@@ -14,6 +14,7 @@ const API = () => `https://api.telegram.org/bot${config.telegramBotToken}`;
 const MAX_MESSAGE_LENGTH = 3900;
 const CALLBACK_PREFIX = "na:";
 let activeTask = null;
+const activeTasks = new Map();
 let selectedProfile = "general";
 let conversationHistory = [];
 const conversationMemoryPath = path.join(config.stateDir, "conversation-history.json");
@@ -39,7 +40,7 @@ async function saveConversationHistory() {
   const safeHistory = conversationHistory
     .filter((item) => item && ["user", "assistant"].includes(item.role) && typeof item.content === "string")
     .slice(-40);
-  const temporary = conversationMemoryPath + ".tmp";
+  const temporary = conversationMemoryPath + "." + randomUUID() + ".tmp";
   await fs.writeFile(temporary, JSON.stringify(safeHistory, null, 2), { mode: 0o600 });
   await fs.rename(temporary, conversationMemoryPath);
 }
@@ -723,18 +724,17 @@ Use /agent <name> in the owner's private chat to switch profiles.`;
 
 function statusText(groupView = false) {
   if (groupView) {
-    return activeTask
-      ? "Nabees Agent is currently busy with a task."
+    return activeTasks.size
+      ? `Nabees Agent is working on ${activeTasks.size} task${activeTasks.size === 1 ? "" : "s"}.`
       : "Nabees Agent is idle and ready.";
   }
-  return activeTask
-    ? `**Task is running**
+  if (!activeTasks.size) return `Agent is idle and ready for a task.\n\nActive profile: **${selectedProfile}**`;
+  const running = [...activeTasks.values()];
+  return `**${running.length} task${running.length === 1 ? "" : "s"} running**
 
-Profile: ${activeTask.profile}
-Started: ${activeTask.startedAt}
+${running.map((session, index) => `**${index + 1}. ${session.id}** — ${session.profile}\nStarted: ${session.startedAt}\n${session.task.slice(0, 350)}`).join("\n\n")}
 
-Task: ${activeTask.task.slice(0, 700)}`
-    : `Agent is idle and ready for a task.\n\nActive profile: **${selectedProfile}**`;
+Use /tasks to see the active task list. You can send another task at any time.`;
 }
 
 async function handleCallback(callback) {
@@ -931,10 +931,6 @@ async function handleMessage(message, taskOptions = {}) {
     // Only download owner uploads from the private chat; never let group members
     // use the bot as a file-hosting proxy or fill the workspace inbox.
     if (isGroup(message.chat) || !isOwner(senderId)) return;
-    if (activeTask) {
-      await sendRich(chatId, "A task is already running. Please wait for it to finish before sending a file.", menuButtons());
-      return;
-    }
     const uploaded = await downloadTelegramAttachment(message);
     if (!uploaded) return;
     const caption = message.caption?.trim();
@@ -975,6 +971,10 @@ async function handleMessage(message, taskOptions = {}) {
     await sendRich(chatId, statusText(), menuButtons());
     return;
   }
+  if (name === "tasks") {
+    await sendRich(chatId, statusText(), menuButtons());
+    return;
+  }
   if (name === "agents") {
     await sendRich(chatId, await profilesText(), menuButtons());
     return;
@@ -1004,13 +1004,16 @@ async function handleMessage(message, taskOptions = {}) {
     await sendRich(chatId, "Tell me what to do, for example: `/task Inspect the workspace and summarize its files.`", menuButtons());
     return;
   }
-  if (activeTask) {
-    await sendRich(chatId, "A task is already running. Please wait for it to finish, then send the next task.", menuButtons());
-    return;
-  }
-
-  activeTask = { task, profile: selectedProfile, startedAt: new Date().toISOString() };
-  const progressEvents = ["Request received."];
+  const session = {
+    id: randomUUID().slice(0, 8),
+    task,
+    profile: selectedProfile,
+    startedAt: new Date().toISOString(),
+    history: conversationHistory.slice(-20)
+  };
+  activeTasks.set(session.id, session);
+  activeTask = session;
+  const progressEvents = [`Task session ${session.id} received.`];
   const draftId = Math.max(1, Date.now() % 2147483647);
   let progressTimer = null;
   let draftUpdateBusy = false;
@@ -1037,8 +1040,8 @@ async function handleMessage(message, taskOptions = {}) {
     await updateDraft(draftLabelForTask(task));
     progressTimer = setInterval(() => { void updateDraft(); }, 5_000);
     const result = await runAgent(task, {
-      profile: activeTask.profile,
-      history: conversationHistory,
+      profile: session.profile,
+      history: session.history,
       onProgress: (event) => {
         if (event.type === "tool_start" || event.type === "model_start") {
           void updateDraft(event.message || draftLabelForTask(task));
@@ -1049,32 +1052,32 @@ async function handleMessage(message, taskOptions = {}) {
         }
       }
     });
-    if (Array.isArray(result.history)) {
-      conversationHistory = result.history.slice(-40);
-      await saveConversationHistory();
-    }
+    if (Array.isArray(result.history)) session.history = result.history.slice(-40);
+    conversationHistory = [...conversationHistory, { role: "user", content: task }, { role: "assistant", content: result.answer || "" }].slice(-40);
+    await saveConversationHistory();
     if (progressTimer) clearInterval(progressTimer);
     progressTimer = null;
 
     if (result.status === "failed" || result.status === "step_limit") {
       progressEvents.push(result.status === "step_limit" ? "Work paused at the execution limit." : "The request ended with an error.");
-      await sendRichHtml(chatId, progressMessage(task, activeTask.profile, progressEvents, "failed", result.answer, result.checkpoint));
+      await sendRichHtml(chatId, progressMessage(task, session.profile, progressEvents, "failed", result.answer, result.checkpoint));
       return;
     }
 
     progressEvents.push("Finished.");
     const followupButtons = await createFollowupButtons(task, result.answer);
-    await sendRichHtml(chatId, progressMessage(task, activeTask.profile, progressEvents, "done", result.answer, result.checkpoint, followupButtons));
+    await sendRichHtml(chatId, progressMessage(task, session.profile, progressEvents, "done", result.answer, result.checkpoint, followupButtons));
   } catch (error) {
     console.error("Agent task execution failed:", describeError(error));
     if (error?.stack) console.error(error.stack);
     if (progressTimer) clearInterval(progressTimer);
     progressTimer = null;
     progressEvents.push("The request ended with an error.");
-    await sendRichHtml(chatId, progressMessage(task, activeTask.profile, progressEvents, "failed", error.message || "Unknown error"));
+    await sendRichHtml(chatId, progressMessage(task, session.profile, progressEvents, "failed", error.message || "Unknown error"));
   } finally {
     if (progressTimer) clearInterval(progressTimer);
-    activeTask = null;
+    activeTasks.delete(session.id);
+    activeTask = [...activeTasks.values()].at(-1) || null;
   }
 }
 
