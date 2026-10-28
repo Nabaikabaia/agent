@@ -8,6 +8,7 @@ import { config } from "./config.js";
 const MAX_TEXT = 24_000;
 const tabs = new Map();
 let browserPromise;
+let externalBrowserPromise;
 let nextTab = 1;
 const downloadLog = [];
 
@@ -100,11 +101,33 @@ async function createTab() {
     }
   });
   const page = await context.newPage();
+  return trackTab(context, page);
+}
+
+function trackTab(context, page) {
   const id = `tab-${nextTab++}`;
-  const tab = { id, context, page, createdAt: new Date().toISOString(), lastUrl: "about:blank" };
+  const tab = { id, context, page, createdAt: new Date().toISOString(), lastUrl: page.url(), networkLog: [] };
+  const pushNetwork = (entry) => {
+    tab.networkLog.push({ at: new Date().toISOString(), ...entry });
+    if (tab.networkLog.length > 500) tab.networkLog.splice(0, tab.networkLog.length - 500);
+  };
   page.on("framenavigated", (frame) => {
     if (frame === page.mainFrame()) tab.lastUrl = frame.url();
   });
+  page.on("request", (request) => pushNetwork({
+    type: "request", url: request.url(), method: request.method(),
+    resource_type: request.resourceType(), request
+  }));
+  page.on("response", (response) => pushNetwork({
+    type: "response", url: response.url(), status: response.status(),
+    method: response.request().method(), resource_type: response.request().resourceType(),
+    request: response.request(), response
+  }));
+  page.on("requestfailed", (request) => pushNetwork({
+    type: "failed", url: request.url(), method: request.method(),
+    resource_type: request.resourceType(), failure: request.failure()?.errorText || "Request failed",
+    request
+  }));
   page.on("download", async (download) => {
     try {
       const dir = path.resolve(config.workspace, "browser-downloads");
@@ -350,6 +373,72 @@ async function browserLinks(args) {
   return { tab_id: tab.id, url: tab.page.url(), links };
 }
 
+async function browserNetwork(args) {
+  const tab = getTab(args.tab_id);
+  const needle = String(args.url_contains || "").toLowerCase();
+  const method = String(args.method || "").toUpperCase();
+  const statusFilter = Number(args.status);
+  const entries = tab.networkLog.filter((entry) =>
+    (!needle || entry.url.toLowerCase().includes(needle)) &&
+    (!method || entry.method === method) &&
+    (!Number.isFinite(statusFilter) || statusFilter <= 0 || entry.status === statusFilter)
+  ).slice(-Math.min(200, Math.max(1, Number(args.limit) || 60)));
+  const redactHeaders = (headers) => Object.fromEntries(Object.entries(headers || {}).map(([key, value]) => [
+    key, /authorization|cookie|token|api[-_]?key|secret/i.test(key) ? "[REDACTED]" : String(value).slice(0, 1000)
+  ]));
+  const output = [];
+  for (const entry of entries) {
+    const request = entry.request;
+    const response = entry.response;
+    const item = {
+      at: entry.at, type: entry.type, url: entry.url, method: entry.method,
+      status: entry.status ?? null, resource_type: entry.resource_type,
+      failure: entry.failure || null,
+      request_headers: request ? redactHeaders(request.headers()) : undefined
+    };
+    if (response) {
+      item.response_headers = redactHeaders(await response.allHeaders().catch(() => ({})));
+      if (args.include_bodies === true) {
+        const contentType = String(item.response_headers["content-type"] || "");
+        if (/json|text|javascript|xml|graphql/i.test(contentType)) {
+          const raw = await response.text().catch(() => "");
+          item.response_body = raw.slice(0, 12000)
+            .replace(/("(?:access_token|refresh_token|token|api[_-]?key|password|secret|authorization)"\s*:\s*")[^"]*/gi, "$1[REDACTED]")
+            .replace(/(Bearer\s+)[A-Za-z0-9._~+\/-]+/gi, "$1[REDACTED]");
+          if (raw.length > 12000) item.response_body += "\n[body truncated]";
+        } else {
+          item.response_body = "[omitted: response is not text/JSON]";
+        }
+      }
+    }
+    output.push(item);
+  }
+  return { tab_id: tab.id, url: tab.page.url(), captured_events: tab.networkLog.length, returned: output.length, events: output };
+}
+
+async function browserConnectExternal() {
+  const endpoint = String(process.env.BROWSER_CDP_URL || "").trim();
+  if (!endpoint) throw new Error("Set BROWSER_CDP_URL to the DevTools WebSocket endpoint of the separately installed Chromium/Chrome browser, then restart Nabees.");
+  if (!/^wss?:\/\//i.test(endpoint)) throw new Error("BROWSER_CDP_URL must be a ws:// or wss:// DevTools endpoint.");
+  if (!externalBrowserPromise) {
+    externalBrowserPromise = chromium.connectOverCDP(endpoint).catch((error) => {
+      externalBrowserPromise = undefined;
+      throw new Error("Could not connect to the external browser via CDP: " + error.message);
+    });
+  }
+  const browser = await externalBrowserPromise;
+  const contexts = browser.contexts();
+  let added = 0;
+  for (const context of contexts) {
+    for (const page of context.pages()) {
+      if ([...tabs.values()].some((tab) => tab.page === page)) continue;
+      trackTab(context, page);
+      added++;
+    }
+  }
+  return { connected: true, contexts: contexts.length, tabs_discovered: added, message: "External browser connected. Use browser_list_tabs to inspect its tabs." };
+}
+
 async function browserImages(args) {
   const tab = getTab(args.tab_id);
   const images = await tab.page.locator("img").evaluateAll((items) => items.slice(0, 100).map((item) => ({
@@ -385,6 +474,8 @@ export async function executeBrowserTool(name, args) {
     case "browser_refresh": return await browserRefresh(args);
     case "browser_links": return await browserLinks(args);
     case "browser_images": return await browserImages(args);
+    case "browser_network": return await browserNetwork(args);
+    case "browser_connect_external": return await browserConnectExternal();
     default: throw new Error(`Unknown browser tool: ${name}`);
   }
 }
@@ -394,6 +485,11 @@ export async function closeBrowser() {
     const browser = await browserPromise.catch(() => null);
     await browser?.close().catch(() => {});
     browserPromise = undefined;
+  }
+  if (externalBrowserPromise) {
+    const external = await externalBrowserPromise.catch(() => null);
+    await external?.close().catch(() => {});
+    externalBrowserPromise = undefined;
   }
   tabs.clear();
 }
