@@ -131,11 +131,15 @@ async function installManagedChromium() {
 }
 
 async function launchLocalBrowser() {
-  const executablePath = process.env.BROWSER_EXECUTABLE_PATH
-    ? await findSystemBrowser()
-    : (process.env.BROWSER_PREFER_SYSTEM === "true" ? await findSystemBrowser() : null);
-  if (process.env.BROWSER_EXECUTABLE_PATH && !executablePath) {
-    throw new Error("BROWSER_EXECUTABLE_PATH is set, but the executable cannot be found or accessed.");
+  const explicitPath = String(process.env.BROWSER_EXECUTABLE_PATH || "").trim();
+  let executablePath = null;
+  if (explicitPath) {
+    try { await fs.access(explicitPath); executablePath = explicitPath; } catch {}
+    if (!executablePath) {
+      throw new Error("BROWSER_EXECUTABLE_PATH is set, but the executable cannot be found or accessed.");
+    }
+  } else if (process.env.BROWSER_PREFER_SYSTEM !== "false") {
+    executablePath = await findSystemBrowser();
   }
   const options = {
     headless: true,
