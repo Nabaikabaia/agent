@@ -8,7 +8,9 @@ Node.js autonomous agent powered by OpenRouter (configurable with an OpenAI-comp
 - Dynamic in-message choice prompts: the agent can pause a task, ask the owner a question with 2–8 context-specific buttons, and continue using the selected answer. Prompts expire after a timeout.
 - Workspace file listing, reading, and writing.
 - Public web search and readable-page fetching.
-- Patchright-controlled Chromium is the default browser backend, with DOM snapshots, JavaScript evaluation, form interaction, upload/download handling, screenshots, links, images, navigation history and tab management.
+- Persistent Nabees identity across task and chat prompts; bounded specialist subagents can be spawned by the main agent only, and subagents cannot create further agents.
+- Independent Telegram task sessions: send another task while earlier tasks run, and use `/status` or `/tasks` to inspect active work. Each task gets its own context snapshot and checkpoint.
+- Patchright-controlled Chromium with DOM snapshots, JavaScript evaluation, form interaction, upload/download handling, screenshots, links, images, navigation history, tab management, and captured request/response network inspection.
 - Send a document, image, audio clip, video, voice note, animation, or sticker to the bot in its private Telegram chat to upload it into `workspace/inbox/` and ask the agent to analyse it. Add a caption to give a specific instruction; otherwise it will attempt a general analysis. Text/code, JSON, CSV, and common office formats (PDF, DOC/DOCX, XLS/XLSX, PPT/PPTX, ODT/ODS/ODP, RTF, EPUB) get automatic text extraction where supported; extracted text is capped at 60,000 characters. Images and media are stored for tool-based inspection, but vision/OCR depends on available tools and is not guaranteed. Telegram cloud downloads are limited to 20 MB per file. Unsupported or encrypted formats are stored when Telegram permits, but the agent must report extraction limitations rather than inventing contents.
 - Browser downloads and screenshots saved under the configured workspace, with Telegram photo delivery for screenshots and document delivery for downloadable files sent to the configured owner. Document delivery is limited to files in the configured workspace, blocks common secret/key files, and enforces a 45 MB limit.
 - GitHub REST API access for repositories, contents, commits, issues, pull requests, releases, and search.
@@ -33,9 +35,9 @@ After installation, the agent discovers `SKILL.md` instructions in workspace ski
 
 Tools: `list_skills`, `read_skill`, and `install_skill`.
 
-## Patchright browser backend
+## Browser backends and network inspection
 
-Patchright is the agent's only browser automation backend. It is a Playwright-compatible, Chromium-focused alternative designed to reduce common automation-detection signals. The browser adapter runs Chromium locally inside the Box and does not require a hosted browser service or a separate browser daemon.
+Patchright is the default browser automation backend. It is a Playwright-compatible, Chromium-focused alternative designed to reduce common automation-detection signals. The browser adapter runs Chromium locally inside the Box and does not require a hosted browser service or a separate browser daemon. For a separately installed Chrome/Chromium instance, Nabees can connect through Chrome DevTools Protocol when you configure `BROWSER_CDP_URL`.
 
 Install dependencies and the Chromium build with:
 
@@ -46,7 +48,9 @@ npm run browser:install
 
 The installer downloads the Chromium build used by Patchright. The Box must also provide the operating-system libraries required by Chromium. On Linux ARM64, use the Chromium build rather than the Google Chrome installer; the Chrome installer has had ARM64 limitations. Patchright can reduce some automation signals, but it does not guarantee access to every site and must not be used to bypass CAPTCHAs or other access-control challenges.
 
-The browser tools support opening/navigating/listing tabs, DOM snapshots, click/type/press/scroll/wait, page-context JavaScript evaluation, native select changes, file upload, screenshots, links, images, downloads, back/forward, refresh, and tab closing. Downloads and screenshots are saved under the configured workspace.
+The browser tools support opening/navigating/listing tabs, DOM snapshots, click/type/press/scroll/wait, page-context JavaScript evaluation, native select changes, file upload, screenshots, links, images, downloads, back/forward, refresh, and tab closing. `browser_network` inspects captured requests, response status codes, failures, redacted headers, and optionally text/JSON response bodies. Body inspection is opt-in and truncated. Downloads and screenshots are saved under the configured workspace.
+
+To attach to a separately running Chrome/Chromium instance, launch it with remote debugging enabled and set `BROWSER_CDP_URL` to its DevTools WebSocket endpoint in `.env`. Keep the endpoint private; anyone who can access it may control the browser and inspect its logged-in session. `browser_connect_external` reports an error if no endpoint is configured or connection fails.
 
 `BROWSER_ALLOW_LOCALHOST=false` remains the default. Browser HTTP(S) requests to private/local network targets and metadata hosts are blocked by default.
 ## Chat providers
@@ -81,7 +85,7 @@ Send `/start` to the bot, then chat normally. Telegram replies use Rich Messages
 - Research a library, read its documentation, inspect its GitHub repository, and assess whether it fits my project.
 - Clone my public repository into the workspace and explain its structure.
 
-The Telegram controller keeps up to 10 exchanges in memory; context resets when it restarts. Only one task runs at a time. `AGENT_MAX_STEPS` sets the size of each model-step batch; if a task is still underway at a batch boundary, the agent automatically continues from the current tool results for up to three batches (maximum 60 model steps total). Package installation requests pause until the configured owner taps **Approve** or **Reject**. Approval records are stored in `.agent-state/package-approvals.json`; expired, stale, or interrupted requests never install a package. If the process restarts, an in-flight task cannot resume automatically, so its pending request is marked interrupted and must be requested again.
+The Telegram controller stores recent conversation context and can run multiple independent task sessions concurrently. Use `/status` or `/tasks` to list active sessions. Each task receives its own context snapshot; new tasks can be submitted without waiting for existing tasks to finish. In-flight work is not automatically resumed after a process restart. `AGENT_MAX_STEPS` sets the size of each model-step batch; if a task is still underway at a batch boundary, the agent automatically continues from the current tool results for up to three batches (maximum 60 model steps total). Package installation requests pause until the configured owner taps **Approve** or **Reject**. Approval records are stored in `.agent-state/package-approvals.json`; expired, stale, or interrupted requests never install a package. If the process restarts, an in-flight task cannot resume automatically, so its pending request is marked interrupted and must be requested again.
 
 ## Commands
 
