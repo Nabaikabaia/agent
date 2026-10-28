@@ -41,6 +41,12 @@ This skill is guidance for the browser tools already installed in Nabees. Do not
 - Do not forge or inject challenge tokens, defeat Turnstile or other anti-bot protections, or use a solver to evade site restrictions, quotas, eligibility checks, or account protections. For MFA or phone verification, use the site's supported flow and ask Sir for the required action when needed.
 - Never describe a challenge as solved until the site visibly accepts it.
 
+## Turnstile diagnostics
+
+- When a page appears to use Cloudflare Turnstile, call `browser_turnstile_diagnostics` with the current `tab_id` after navigation and, if needed, after the widget loads.
+- The tool checks captured network URLs plus DOM attributes, Turnstile iframe parameters, and inline widget configuration. Compare multiple candidates and evidence rather than guessing; if no key is found, inspect `browser_network` with a Turnstile-related URL filter and take a fresh page snapshot.
+- The detected site key is a public widget identifier, not a solved challenge or a secret. This diagnostic tool does not call Snowping, create a response token, or inject a token into a page. Do not report the challenge as passed unless the site itself visibly accepts normal verification.
+
 ## Browser interaction rules
 
 - Always inspect the page before acting on unfamiliar UI.
