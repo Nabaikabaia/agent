@@ -186,7 +186,7 @@ export async function runAgent(task, options = {}) {
       await save();
       return { answer, status: record.status, checkpoint, history: [...previousTurns, { role: "user", content: task.trim() }, { role: "assistant", content: answer }].slice(-20) };
     } catch (error) {
-      const answer = "I couldn’t complete the screenshot workflow: " + (error.message || "Unknown browser or Telegram error.");
+      const answer = "Sir, the screenshot workflow hit an execution issue. The technical details are in the server log.";
       record.status = "failed";
       record.error = error.message || "Screenshot workflow failed";
       record.answer = answer;
@@ -232,8 +232,8 @@ export async function runAgent(task, options = {}) {
     } catch (error) {
       const fallback = basicChatFallback(task);
       const answer = fallback
-        ? `${fallback}\n\nGPT-5 chat is temporarily unavailable: ${error.message || "request failed"}`
-        : `GPT-5 chat failed: ${error.message || "request failed"}`;
+        ? fallback
+        : "Sir, the chat route is unavailable. Send a work request and I will use the execution tools.";
       record.status = fallback ? "completed" : "failed";
       record.error = error.message || "GPT-5 chat request failed";
       record.answer = answer;
@@ -265,7 +265,7 @@ export async function runAgent(task, options = {}) {
       options.onProgress?.({ type: "tool_done", tool: "install_skill", message: result.installed ? "Skill setup completed." : "Skill setup was not completed." });
       return { answer, status: record.status, checkpoint, history: [...previousTurns, { role: "user", content: task.trim() }, { role: "assistant", content: answer }].slice(-20) };
     } catch (error) {
-      const answer = "Skill setup failed: " + (error.message || "Unknown error.");
+      const answer = "Sir, skill setup hit an execution issue. The technical details are in the server log.";
       record.status = "failed";
       record.error = error.message || "Skill setup failed";
       record.answer = answer;
@@ -292,13 +292,13 @@ export async function runAgent(task, options = {}) {
       options.onProgress?.({ type: "tool_done", step: 1, maxSteps: 1, tool: "update_repository", message: result?.updated ? "Git pull completed: " + (result.output || result.currentCommit || "repository updated") : "Git pull returned without confirming an update." });
       return { answer, status: record.status, checkpoint, history: [...previousTurns, { role: "user", content: task.trim() }, { role: "assistant", content: answer }].slice(-20) };
     } catch (error) {
-      const answer = `Repository update failed: ${error.message || "Unknown error"}`;
+      const answer = "Sir, the repository update failed. The technical details are in the server log.";
       record.status = "failed";
       record.error = error.message || "Unknown error";
       record.answer = answer;
       record.finishedAt = new Date().toISOString();
       await save();
-      options.onProgress?.({ type: "tool_done", step: 1, maxSteps: 1, tool: "update_repository", message: "Git pull failed: " + (error.message || "unknown error") });
+      options.onProgress?.({ type: "tool_done", step: 1, maxSteps: 1, tool: "update_repository", message: "Repository update failed; see server log." });
       return { answer, status: record.status, checkpoint, history: [...previousTurns, { role: "user", content: task.trim() }, { role: "assistant", content: answer }].slice(-20) };
     }
   }
@@ -336,7 +336,7 @@ export async function runAgent(task, options = {}) {
       const calls = message.tool_calls || [];
       if (!calls.length) {
         const rawAnswer = message.content || "";
-        const cannedFailure = /(?:sorry.{0,100}(?:cannot|unable)|cannot help|unable to assist|potentially dangerous or harmful content|could not complete that request|i couldn't complete that request|ai provider api error|openrouter|inception.{0,20}mercury)/i.test(rawAnswer);
+        const cannedFailure = /(?:sorry.{0,100}(?:cannot|can.t|unable)|can.t help|cannot help|unable to assist|potentially dangerous or harmful content|could not complete that request|i couldn't complete that request|ai provider api error|openrouter|inception.{0,20}mercury)/i.test(rawAnswer);
         const answer = cannedFailure
           ? "Sir, this execution route did not produce an actionable result. The task remains unfinished."
           : rawAnswer || "Sir, no actionable result was returned.";
