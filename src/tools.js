@@ -440,7 +440,7 @@ async function clearWorkspace() {
   }
   await fs.mkdir(config.workspace, { recursive: true });
   const entries = await fs.readdir(config.workspace, { withFileTypes: true });
-  const protectedName = (name) => name === ".git" || name === ".agent-state" || /^\\.env(?:\\.|$)/i.test(name) || /^(?:credentials?(?:\\..*)?|secrets?(?:\\..*)?|id_rsa|id_ed25519|id_ecdsa|.*\\.(?:pem|key|p12|pfx))$/i.test(name);
+  const protectedName = (name) => name === ".git" || name === ".agent-state" || /^\.env(?:\.|$)/i.test(name) || /^(?:credentials?(?:\..*)?|secrets?(?:\..*)?|id_rsa|id_ed25519|id_ecdsa|.*\.(?:pem|key|p12|pfx))$/i.test(name);
   const removed = [];
   for (const entry of entries) {
     if (protectedName(entry.name)) continue;
