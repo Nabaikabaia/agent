@@ -981,7 +981,7 @@ async function handleMessage(message, taskOptions = {}) {
   }
   if (name === "kill" || name === "killtask") {
     if (!argument) {
-      await sendRich(chatId, "Sir, provide a task ID: /kill <id>\\nUse /tasks to see running task IDs.", menuButtons());
+      await sendRich(chatId, "Sir, provide a task ID: /kill <id>\nUse /tasks to see running task IDs.", menuButtons());
       return;
     }
     const session = activeTasks.get(argument);
