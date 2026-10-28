@@ -335,8 +335,12 @@ export async function runAgent(task, options = {}) {
 
       const calls = message.tool_calls || [];
       if (!calls.length) {
-        const answer = message.content || "The model returned no text.";
-        record.status = "completed";
+        const rawAnswer = message.content || "";
+        const cannedFailure = /(?:sorry.{0,100}(?:cannot|unable)|cannot help|unable to assist|potentially dangerous or harmful content|could not complete that request|i couldn't complete that request|ai provider api error|openrouter|inception.{0,20}mercury)/i.test(rawAnswer);
+        const answer = cannedFailure
+          ? "Sir, this execution route did not produce an actionable result. The task remains unfinished."
+          : rawAnswer || "Sir, no actionable result was returned.";
+        record.status = cannedFailure ? "failed" : "completed";
         record.answer = answer;
         record.finishedAt = new Date().toISOString();
         await save();
