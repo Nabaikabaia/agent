@@ -352,24 +352,40 @@ export async function runAgent(task, options = {}) {
           if (name === "spawn_subagent") {
             if (options.isSubagent) {
               output = { error: "Subagents cannot spawn other agents. Complete your assigned task directly." };
-            } else if (spawnedSubagents >= 3) {
-              output = { error: "This task has reached its limit of three subagents. Continue with the tools available to Nabees." };
-            } else if (typeof args.task !== "string" || args.task.trim().length < 10) {
-              output = { error: "Provide a clear, bounded subagent assignment of at least 10 characters." };
             } else {
-              spawnedSubagents++;
-              options.onProgress?.({ type: "subagent_start", message: "Nabees delegated a bounded assignment to a specialist." });
-              const subagentResult = await runAgent(
-                "You are a specialist subagent working for Nabees. Complete only this assignment, use available tools as needed, do not spawn agents, do not broaden scope, and return a concise report of work performed, files changed, checks run, and remaining blockers.\n\nAssignment:\n" + args.task.trim(),
-                { profile: args.profile || profileName, history: [], isSubagent: true }
-              );
-              output = {
-                subagent: true,
-                status: subagentResult.status,
-                answer: subagentResult.answer,
-                checkpoint: subagentResult.checkpoint || null
-              };
-              options.onProgress?.({ type: "subagent_done", message: "The specialist returned its result to Nabees." });
+              const assignments = Array.isArray(args.assignments)
+                ? args.assignments
+                : [{ task: args.task, profile: args.profile }];
+              if (!assignments.length || assignments.length > 3) {
+                output = { error: "Provide between one and three bounded specialist assignments." };
+              } else if (spawnedSubagents + assignments.length > 3) {
+                output = { error: "This task has reached its limit of three subagents. Continue with the tools available to Nabees." };
+              } else if (assignments.some((assignment) => typeof assignment?.task !== "string" || assignment.task.trim().length < 10)) {
+                output = { error: "Every specialist assignment must contain at least 10 characters and a concrete deliverable." };
+              } else {
+                spawnedSubagents += assignments.length;
+                options.onProgress?.({ type: "subagent_start", message: "Nabees delegated " + assignments.length + " bounded assignment(s) to specialist subagents." });
+                const results = await Promise.all(assignments.map(async (assignment, index) => {
+                  try {
+                    const subagentResult = await runAgent(
+                      "You are a specialist subagent working for Nabees. Complete only this assignment, use available tools as needed, do not spawn agents, do not broaden scope, and return a concise report of work performed, files changed, checks run, and remaining blockers.\n\nAssignment:\n" + assignment.task.trim(),
+                      { profile: assignment.profile || args.profile || profileName, history: [], isSubagent: true }
+                    );
+                    return {
+                      index: index + 1,
+                      status: subagentResult.status,
+                      answer: subagentResult.answer,
+                      checkpoint: subagentResult.checkpoint || null
+                    };
+                  } catch (error) {
+                    return { index: index + 1, status: "failed", error: error.message || "Subagent failed." };
+                  }
+                }));
+                output = results.length === 1
+                  ? { subagent: true, ...results[0] }
+                  : { subagents: results };
+                options.onProgress?.({ type: "subagent_done", message: "Specialist results returned to Nabees for review and integration." });
+              }
             }
           } else {
             output = await executeTool(name, args);
