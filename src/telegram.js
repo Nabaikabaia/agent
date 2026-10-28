@@ -13,6 +13,7 @@ import { registerTelegramPhotoSender, registerTelegramDocumentSender } from "./t
 const API = () => `https://api.telegram.org/bot${config.telegramBotToken}`;
 const MAX_MESSAGE_LENGTH = 3900;
 const CALLBACK_PREFIX = "na:";
+const MAX_CONCURRENT_TASKS = 4;
 let activeTask = null;
 const activeTasks = new Map();
 let selectedProfile = "general";
@@ -1002,6 +1003,10 @@ async function handleMessage(message, taskOptions = {}) {
   const task = name === "task" ? argument : text;
   if (!task) {
     await sendRich(chatId, "Tell me what to do, for example: `/task Inspect the workspace and summarize its files.`", menuButtons());
+    return;
+  }
+  if (activeTasks.size >= MAX_CONCURRENT_TASKS) {
+    await sendRich(chatId, `Nabees is already running ${activeTasks.size} tasks, the current concurrency limit. Check /tasks or wait for one to finish before starting another.`, menuButtons());
     return;
   }
   const session = {
