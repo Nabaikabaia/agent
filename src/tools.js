@@ -67,8 +67,8 @@ const DENIED_PATTERNS = [
 export const toolDefinitions = [
   { type: "function", function: { name: "list_files", description: "List files and directories under the configured workspace.", parameters: { type: "object", properties: { path: { type: "string" } }, additionalProperties: false } } },
   { type: "function", function: { name: "read_file", description: "Read a UTF-8 text file inside the configured workspace.", parameters: { type: "object", properties: { path: { type: "string" } }, required: ["path"], additionalProperties: false } } },
-  { type: "function", function: { name: "write_file", description: "Create a UTF-8 text file inside the workspace. Replacing an existing file requires explicit owner approval through Telegram buttons. Sensitive files and secret paths are blocked.", parameters: { type: "object", properties: { path: { type: "string" }, content: { type: "string" } }, required: ["path", "content"], additionalProperties: false } } },
-  { type: "function", function: { name: "delete_file", description: "Delete one regular file inside the configured workspace. Always request and wait for explicit owner approval through Telegram buttons before deleting. Directories, secrets, .git, and agent state are protected.", parameters: { type: "object", properties: { path: { type: "string" } }, required: ["path"], additionalProperties: false } } },
+  { type: "function", function: { name: "write_file", description: "Create or overwrite UTF-8 text files. Files previously created by Nabees inside the workspace may be overwritten without approval. Replacing other existing files requires owner approval; any write outside the workspace always requires approval. Sensitive files and secret paths are blocked.", parameters: { type: "object", properties: { path: { type: "string" }, content: { type: "string" } }, required: ["path", "content"], additionalProperties: false } } },
+  { type: "function", function: { name: "delete_file", description: "Delete one regular file. Files previously created by Nabees inside the workspace may be deleted without approval. Deleting other existing files requires owner approval; any deletion outside the workspace always requires approval. Directories, secrets, .git, and agent state are protected.", parameters: { type: "object", properties: { path: { type: "string" } }, required: ["path"], additionalProperties: false } } },
   { type: "function", function: { name: "web_search", description: "Search the public web for current information. Returns result titles, URLs and snippets.", parameters: { type: "object", properties: { query: { type: "string", minLength: 2 } }, required: ["query"], additionalProperties: false } } },
   { type: "function", function: { name: "browse_url", description: "Fetch and extract readable text from a public HTTP(S) page, including documentation pages. Use web_search to discover URLs first.", parameters: { type: "object", properties: { url: { type: "string" } }, required: ["url"], additionalProperties: false } } },
   { type: "function", function: { name: "github_api", description: "Read public GitHub repository metadata, files, commits, issues, pull requests, releases, and search results using the GitHub REST API. A configured GITHUB_TOKEN enables higher limits/private repositories. Use API paths such as /repos/owner/repo, /repos/owner/repo/contents/src, /repos/owner/repo/issues, /repos/owner/repo/pulls, /repos/owner/repo/commits, /repos/owner/repo/releases, /search/repositories?q=... or /search/code?q=... .", parameters: { type: "object", properties: { path: { type: "string" } }, required: ["path"], additionalProperties: false } } },
@@ -147,49 +147,108 @@ function assertNonSensitivePath(file) {
   return relative;
 }
 
+const createdFilesRegistry = path.join(config.workspace, ".agent-state", "agent-created-files.json");
+
+async function loadCreatedFiles() {
+  try {
+    const parsed = JSON.parse(await fs.readFile(createdFilesRegistry, "utf8"));
+    return new Set(Array.isArray(parsed) ? parsed.filter((item) => typeof item === "string") : []);
+  } catch (error) {
+    if (error.code === "ENOENT" || error instanceof SyntaxError) return new Set();
+    throw error;
+  }
+}
+
+async function saveCreatedFiles(files) {
+  await fs.mkdir(path.dirname(createdFilesRegistry), { recursive: true });
+  const temp = createdFilesRegistry + ".tmp";
+  await fs.writeFile(temp, JSON.stringify([...files].sort(), null, 2) + "\n", { encoding: "utf8", mode: 0o600 });
+  await fs.rename(temp, createdFilesRegistry);
+}
+
+function resolveMutationTarget(value) {
+  if (typeof value !== "string" || !value.trim() || value.includes("\0")) throw new Error("Invalid path.");
+  return path.resolve(config.workspace, value);
+}
+
+function isInsideWorkspace(file) {
+  const relative = path.relative(path.resolve(config.workspace), file);
+  return relative === "" || (!relative.startsWith(".." + path.sep) && relative !== ".." && !path.isAbsolute(relative));
+}
+
+async function approveMutationOutsideWorkspace(file, action) {
+  const choice = await requestUserChoice({
+    prompt: "Sir, Nabees is requesting permission to " + action + " a file outside the configured workspace: " + file + ". Approve only if you recognise this exact path.",
+    choices: ["Approve this change", "Cancel"],
+    timeout_seconds: 300
+  });
+  return !choice.timed_out && choice.selected === "Approve this change";
+}
+
 async function writeFile(args) {
   if (typeof args.content !== "string") throw new Error("content must be a string.");
   if (Buffer.byteLength(args.content, "utf8") > 200_000) throw new Error("File exceeds the 200 KB write limit.");
-  const file = safePath(args.path);
-  const relative = assertNonSensitivePath(file);
+  const file = resolveMutationTarget(args.path);
+  const inside = isInsideWorkspace(file);
+  const relative = inside ? assertNonSensitivePath(file) : file;
+  if (!inside && !(await approveMutationOutsideWorkspace(file, "create or overwrite"))) {
+    return { written: false, approval: "rejected", path: file, message: "The file was left unchanged." };
+  }
+  if (inside) assertNonSensitivePath(file);
   let existing = false;
   try {
     const stat = await fs.lstat(file);
-    if (!stat.isFile()) throw new Error("Only regular files can be replaced.");
+    if (!stat.isFile() || stat.isSymbolicLink()) throw new Error("Only regular files can be replaced.");
     existing = true;
   } catch (error) {
     if (error.code !== "ENOENT") throw error;
   }
-  if (existing) {
-    const choice = await requestUserChoice({
-      prompt: "The agent is about to replace the existing file " + relative + ". This will overwrite its current contents. May I proceed?",
-      choices: ["Approve overwrite", "Cancel"],
-      timeout_seconds: 300
-    });
-    if (choice.timed_out || choice.selected !== "Approve overwrite") {
-      return { written: false, approval: choice.timed_out ? "expired" : "rejected", path: relative, message: "The existing file was left unchanged." };
-    }
+  const createdFiles = inside ? await loadCreatedFiles() : new Set();
+  const wasCreatedByAgent = inside && createdFiles.has(relative);
+  if (existing && !wasCreatedByAgent && (inside ? !(await requestUserChoice({
+    prompt: "Sir, Nabees is about to replace an existing workspace file: " + relative + ". Approve overwriting its current contents?",
+    choices: ["Approve overwrite", "Cancel"],
+    timeout_seconds: 300
+  }).then((choice) => !choice.timed_out && choice.selected === "Approve overwrite")) : false)) {
+    return { written: false, approval: "rejected", path: relative, message: "The existing file was left unchanged." };
   }
   await fs.mkdir(path.dirname(file), { recursive: true });
   await fs.writeFile(file, args.content, { encoding: "utf8", mode: 0o600 });
-  return { written: relative, bytes: Buffer.byteLength(args.content, "utf8"), replaced_existing_file: existing };
+  if (inside) {
+    createdFiles.add(relative);
+    await saveCreatedFiles(createdFiles);
+  }
+  return { written: relative, bytes: Buffer.byteLength(args.content, "utf8"), replaced_existing_file: existing, owner_approval_required: !inside || (existing && !wasCreatedByAgent) };
 }
 
 async function deleteFile(args) {
-  const file = safePath(args.path);
-  const relative = assertNonSensitivePath(file);
+  const file = resolveMutationTarget(args.path);
+  const inside = isInsideWorkspace(file);
+  const relative = inside ? assertNonSensitivePath(file) : file;
+  if (!inside && !(await approveMutationOutsideWorkspace(file, "delete"))) {
+    return { deleted: false, approval: "rejected", path: file, message: "No file was deleted." };
+  }
+  if (inside) assertNonSensitivePath(file);
   const stat = await fs.lstat(file);
-  if (!stat.isFile()) throw new Error("For safety, delete_file only removes a single regular file, not a directory or symbolic link.");
-  const choice = await requestUserChoice({
-    prompt: "The agent requests permission to permanently delete this file: " + relative + ". This cannot be undone by the agent. Proceed?",
-    choices: ["Approve deletion", "Cancel"],
-    timeout_seconds: 300
-  });
-  if (choice.timed_out || choice.selected !== "Approve deletion") {
-    return { deleted: false, approval: choice.timed_out ? "expired" : "rejected", path: relative, message: "No file was deleted." };
+  if (!stat.isFile() || stat.isSymbolicLink()) throw new Error("For safety, delete_file only removes a single regular file, not a directory or symbolic link.");
+  const createdFiles = inside ? await loadCreatedFiles() : new Set();
+  const wasCreatedByAgent = inside && createdFiles.has(relative);
+  if (!wasCreatedByAgent && inside) {
+    const choice = await requestUserChoice({
+      prompt: "Sir, Nabees requests permission to permanently delete this workspace file: " + relative + ". Proceed?",
+      choices: ["Approve deletion", "Cancel"],
+      timeout_seconds: 300
+    });
+    if (choice.timed_out || choice.selected !== "Approve deletion") {
+      return { deleted: false, approval: choice.timed_out ? "expired" : "rejected", path: relative, message: "No file was deleted." };
+    }
   }
   await fs.unlink(file);
-  return { deleted: true, path: relative };
+  if (inside && wasCreatedByAgent) {
+    createdFiles.delete(relative);
+    await saveCreatedFiles(createdFiles);
+  }
+  return { deleted: true, path: relative, owner_approval_required: !wasCreatedByAgent };
 }
 
 function cleanHtml(html) {
