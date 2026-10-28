@@ -2,13 +2,17 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import dns from "node:dns/promises";
 import net from "node:net";
+import { spawn } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import { chromium } from "patchright";
 import { config } from "./config.js";
 
 const MAX_TEXT = 24_000;
+const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const tabs = new Map();
 let browserPromise;
 let externalBrowserPromise;
+let installPromise;
 let nextTab = 1;
 const downloadLog = [];
 
@@ -63,17 +67,147 @@ export async function validateBrowserUrl(value) {
   return url;
 }
 
+function missingBrowserBinary(error) {
+  const message = String(error?.message || error || "");
+  return /executable doesn't exist|executable does not exist|please run .*install|browserType\.launch:.*executable|could not find.*browser/i.test(message);
+}
+
+async function findSystemBrowser() {
+  const candidates = [
+    process.env.BROWSER_EXECUTABLE_PATH,
+    "/usr/bin/chromium",
+    "/usr/bin/chromium-browser",
+    "/usr/bin/google-chrome",
+    "/usr/bin/google-chrome-stable",
+    "/opt/google/chrome/chrome",
+    "/snap/bin/chromium"
+  ].filter(Boolean);
+  for (const candidate of candidates) {
+    try {
+      await fs.access(candidate);
+      return candidate;
+    } catch {}
+  }
+  for (const directory of String(process.env.PATH || "").split(path.delimiter).filter(Boolean)) {
+    for (const name of ["chromium", "chromium-browser", "google-chrome", "google-chrome-stable"]) {
+      const candidate = path.join(directory, name);
+      try {
+        await fs.access(candidate);
+        return candidate;
+      } catch {}
+    }
+  }
+  return null;
+}
+
+async function installManagedChromium() {
+  if (process.env.BROWSER_AUTO_INSTALL === "false") {
+    throw new Error("Automatic Chromium installation is disabled by BROWSER_AUTO_INSTALL=false.");
+  }
+  if (!installPromise) {
+    installPromise = new Promise((resolve, reject) => {
+      const command = process.platform === "win32" ? "npm.cmd" : "npm";
+      const child = spawn(command, ["run", "browser:install"], {
+        cwd: projectRoot,
+        env: process.env,
+        shell: process.platform === "win32",
+        stdio: ["ignore", "pipe", "pipe"]
+      });
+      let output = "";
+      const append = (chunk) => { if (output.length < 6000) output += chunk.toString().slice(0, 6000 - output.length); };
+      child.stdout.on("data", append);
+      child.stderr.on("data", append);
+      child.on("error", (error) => reject(new Error("Could not start the local Chromium installer: " + error.message)));
+      child.on("close", (code) => {
+        if (code === 0) resolve({ installed: true, output: output.trim() });
+        else reject(new Error(`Automatic Chromium installation failed (exit ${code}). Install it during deployment with "npm run browser:install". ${output.trim()}`));
+      });
+    }).catch((error) => {
+      installPromise = undefined;
+      throw error;
+    });
+  }
+  return installPromise;
+}
+
+async function launchLocalBrowser() {
+  const executablePath = process.env.BROWSER_EXECUTABLE_PATH
+    ? await findSystemBrowser()
+    : (process.env.BROWSER_PREFER_SYSTEM === "true" ? await findSystemBrowser() : null);
+  if (process.env.BROWSER_EXECUTABLE_PATH && !executablePath) {
+    throw new Error("BROWSER_EXECUTABLE_PATH is set, but the executable cannot be found or accessed.");
+  }
+  const options = {
+    headless: true,
+    args: ["--no-sandbox", "--disable-dev-shm-usage"],
+    ...(executablePath ? { executablePath } : {})
+  };
+  try {
+    return await chromium.launch(options);
+  } catch (firstError) {
+    if (!missingBrowserBinary(firstError)) throw firstError;
+    await installManagedChromium();
+    return await chromium.launch({ headless: true, args: options.args });
+  }
+}
+
 async function getBrowser() {
   if (!browserPromise) {
-    browserPromise = chromium.launch({
-      headless: true,
-      args: ["--no-sandbox", "--disable-dev-shm-usage"]
-    }).catch((error) => {
+    browserPromise = (async () => {
+      try {
+        return await launchLocalBrowser();
+      } catch (localError) {
+        const endpoint = String(process.env.BROWSER_CDP_URL || "").trim();
+        if (endpoint && /^wss?:\/\//i.test(endpoint)) {
+          try {
+            externalBrowserPromise ||= chromium.connectOverCDP(endpoint);
+            const connected = await externalBrowserPromise;
+            return connected;
+          } catch (remoteError) {
+            externalBrowserPromise = undefined;
+            throw new Error(`Local Chromium could not start (${localError.message}). The configured remote browser also failed (${remoteError.message}).`);
+          }
+        }
+        browserPromise = undefined;
+        throw new Error(`Nabees could not start its browser in this environment. ${localError.message} If the browser binary is missing, enable BROWSER_AUTO_INSTALL or run "npm run browser:install" during deployment. If system libraries or sandbox permissions are missing, use a compatible container image or configure an optional private BROWSER_CDP_URL fallback.`);
+      }
+    })().catch((error) => {
       browserPromise = undefined;
-      throw new Error(`Playwright could not launch Chromium. Run "npx patchright install chromium" and verify the Box has the required system libraries. Details: ${error.message}`);
+      throw error;
     });
   }
   return browserPromise;
+}
+
+async function browserDiagnostics() {
+  const candidates = [
+    process.env.BROWSER_EXECUTABLE_PATH,
+    "/usr/bin/chromium",
+    "/usr/bin/chromium-browser",
+    "/usr/bin/google-chrome",
+    "/usr/bin/google-chrome-stable",
+    "/opt/google/chrome/chrome",
+    "/snap/bin/chromium"
+  ].filter(Boolean);
+  const installed = [];
+  for (const candidate of candidates) {
+    try { await fs.access(candidate); installed.push(candidate); } catch {}
+  }
+  return {
+    runtime: "patchright",
+    platform: process.platform,
+    architecture: process.arch,
+    node_version: process.version,
+    headless: true,
+    managed_browser_install: "npm run browser:install",
+    auto_install_enabled: process.env.BROWSER_AUTO_INSTALL !== "false",
+    remote_fallback_configured: Boolean(String(process.env.BROWSER_CDP_URL || "").trim()),
+    explicit_executable_configured: Boolean(process.env.BROWSER_EXECUTABLE_PATH),
+    detected_system_browsers: [...new Set(installed)],
+    local_browser_started: Boolean(browserPromise),
+    external_browser_connected: Boolean(externalBrowserPromise),
+    note: "Diagnostics report environment hints; browser launch is tested when browser_open is called."
+  };
 }
 
 function getTab(tabId) {
