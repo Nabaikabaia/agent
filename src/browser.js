@@ -570,6 +570,81 @@ async function browserNetwork(args) {
   return { tab_id: tab.id, url: tab.page.url(), captured_events: tab.networkLog.length, returned: output.length, events: output };
 }
 
+
+async function browserTurnstileDiagnostics(args) {
+  const tab = getTab(args.tab_id);
+  const page = tab.page;
+  const candidates = new Map();
+  const add = (value, source, evidence) => {
+    const key = String(value || "").trim();
+    // Turnstile site keys are public widget identifiers, not response tokens.
+    if (!/^[0-9a-zA-Z_-]{8,200}$/.test(key)) return;
+    const previous = candidates.get(key) || { sitekey: key, sources: [], evidence: [] };
+    if (!previous.sources.includes(source)) previous.sources.push(source);
+    if (evidence && previous.evidence.length < 5 && !previous.evidence.includes(evidence)) previous.evidence.push(evidence.slice(0, 300));
+    candidates.set(key, previous);
+  };
+  const inspectUrl = (raw, source) => {
+    try {
+      const url = new URL(raw);
+      const host = url.hostname.toLowerCase();
+      const pathAndHost = host + url.pathname;
+      const looksTurnstile = /challenges\\.cloudflare\\.com|turnstile/i.test(pathAndHost);
+      for (const name of ["sitekey", "site_key", "render", "k"]) {
+        const value = url.searchParams.get(name);
+        if (value && (looksTurnstile || name === "sitekey" || name === "site_key")) {
+          add(value, source, url.origin + url.pathname + "?" + name + "=" + value);
+        }
+      }
+    } catch {}
+  };
+  for (const entry of tab.networkLog) inspectUrl(entry.url, "network:" + entry.type);
+  const pageFindings = await page.evaluate(() => {
+    const out = [];
+    const push = (sitekey, source, evidence) => {
+      if (sitekey) out.push({ sitekey: String(sitekey), source, evidence: String(evidence || "").slice(0, 300) });
+    };
+    for (const el of document.querySelectorAll("[data-sitekey], [data-site-key], .cf-turnstile")) {
+      push(el.getAttribute("data-sitekey") || el.getAttribute("data-site-key"), "dom-attribute", el.outerHTML);
+    }
+    for (const frame of document.querySelectorAll('iframe[src*="challenges.cloudflare.com"], iframe[src*="turnstile"]')) {
+      try {
+        const src = new URL(frame.src);
+        push(src.searchParams.get("k") || src.searchParams.get("sitekey") || src.searchParams.get("render"), "turnstile-iframe", src.origin + src.pathname + src.search);
+      } catch {}
+    }
+    for (const script of document.scripts) {
+      const src = script.src || "";
+      if (/challenges\\.cloudflare\\.com\\/turnstile|turnstile/i.test(src)) {
+        try {
+          const url = new URL(src, location.href);
+          push(url.searchParams.get("render") || url.searchParams.get("sitekey"), "turnstile-script-url", url.origin + url.pathname + url.search);
+        } catch {}
+      }
+      if (script.textContent && /turnstile|cf-turnstile/i.test(script.textContent)) {
+        const text = script.textContent.slice(0, 250000);
+        const patterns = [
+          /(?:sitekey|siteKey|site_key)\\s*[:=]\\s*["']([0-9a-zA-Z_-]{8,200})["']/g,
+          /turnstile\\.render\\s*\\([^,]+,\\s*\\{[\\s\\S]{0,1000}?sitekey\\s*:\\s*["']([0-9a-zA-Z_-]{8,200})["']/g
+        ];
+        for (const pattern of patterns) {
+          let match, count = 0;
+          while ((match = pattern.exec(text)) && count++ < 10) push(match[1], "turnstile-inline-config", match[0]);
+        }
+      }
+    }
+    return out.slice(0, 100);
+  }).catch(() => []);
+  for (const finding of pageFindings) add(finding.sitekey, finding.source, finding.evidence);
+  return {
+    tab_id: tab.id,
+    url: page.url(),
+    turnstile_detected: candidates.size > 0 || tab.networkLog.some((entry) => /challenges\\.cloudflare\\.com\\/turnstile|turnstile/i.test(entry.url)),
+    candidates: [...candidates.values()],
+    note: "Diagnostic only: site keys identify public widgets. This tool does not solve challenges, create response tokens, or submit/inject tokens."
+  };
+}
+
 async function browserConnectExternal() {
   const endpoint = String(process.env.BROWSER_CDP_URL || "").trim();
   if (!endpoint) throw new Error("Set BROWSER_CDP_URL to the DevTools WebSocket endpoint of the separately installed Chromium/Chrome browser, then restart Nabees.");
@@ -630,6 +705,7 @@ export async function executeBrowserTool(name, args) {
     case "browser_links": return await browserLinks(args);
     case "browser_images": return await browserImages(args);
     case "browser_network": return await browserNetwork(args);
+    case "browser_turnstile_diagnostics": return await browserTurnstileDiagnostics(args);
     case "browser_connect_external": return await browserConnectExternal();
     default: throw new Error(`Unknown browser tool: ${name}`);
   }
