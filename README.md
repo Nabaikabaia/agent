@@ -46,7 +46,7 @@ npm install
 npm run browser:install
 ```
 
-The container still needs the OS libraries and permissions required by Chromium. A failed launch that points to missing libraries or sandbox restrictions should be fixed in the container image or by using a compatible runtime; downloading the browser binary alone cannot resolve those issues. To prefer an already-installed system browser, set `BROWSER_PREFER_SYSTEM=true`; to use a specific executable, set `BROWSER_EXECUTABLE_PATH=/absolute/path/to/chromium`. If that explicit path is invalid, Nabees reports the configuration error instead of silently choosing another binary.
+The container still needs the OS libraries and permissions required by Chromium. A failed launch that points to missing libraries or sandbox restrictions should be fixed in the container image or by using a compatible runtime; downloading the browser binary alone cannot resolve those issues. Nabees automatically checks for an installed system browser by default and falls back to Patchright-managed Chromium if the system browser is incompatible. Set `BROWSER_PREFER_SYSTEM=false` to use the managed browser first; to pin a specific executable, set `BROWSER_EXECUTABLE_PATH=/absolute/path/to/chromium`. If that explicit path is invalid, Nabees reports the configuration error instead of silently choosing another binary.
 
 Use the `browser_diagnostics` tool to inspect the runtime OS, architecture, detected browser paths, auto-install policy, and whether a remote fallback is configured. A browser launch is tested only when `browser_open` is called.
 
