@@ -69,7 +69,7 @@ async function getFreeToolModelIds() {
   return ids;
 }
 
-async function requestModel(model, messages, tools) {
+async function requestModel(model, messages, tools, signal) {
   let response;
   try {
     response = await fetch(`${config.baseUrl}/chat/completions`, {
@@ -85,7 +85,7 @@ async function requestModel(model, messages, tools) {
         tool_choice: "auto",
         stream: false
       }),
-      signal: AbortSignal.timeout(config.aiRequestTimeoutMs)
+      signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(config.aiRequestTimeoutMs)]) : AbortSignal.timeout(config.aiRequestTimeoutMs)
     });
   } catch (error) {
     const timeout = error?.name === "TimeoutError" || error?.name === "AbortError";
@@ -130,10 +130,11 @@ async function requestModel(model, messages, tools) {
   return { model, message: choice.message };
 }
 
-export async function chatCompletion(messages, tools) {
+export async function chatCompletion(messages, tools, options = {}) {
+  if (options.signal?.aborted) throw new Error("Task cancelled.");
   const provider = config.provider || "openrouter";
   const primary = config.model;
-  const first = await requestModel(primary, messages, tools);
+  const first = await requestModel(primary, messages, tools, options.signal);
   if (first.message) return first.message;
 
   const firstError = first.error?.message || "Unknown provider error";
@@ -145,25 +146,29 @@ export async function chatCompletion(messages, tools) {
   // Model discovery and :free failover are OpenRouter-specific. Never send
   // OpenRouter model IDs to another provider after its request fails.
   if (provider !== "openrouter") {
-    throw new Error(`AI provider API error from ${provider} (${primary}): ${firstError}`);
+    console.warn("[Nabees] Primary model request failed:", first.status, firstError);
+    throw new Error("Execution model unavailable.");
   }
 
   if (!isRetryable(first.status, firstError)) {
-    throw new Error(`AI provider API error from ${primary}: ${firstError}`);
+    console.warn("[Nabees] Model request could not be retried:", first.status, firstError);
+    throw new Error("Execution model unavailable.");
   }
 
   const discovered = await getFreeToolModelIds();
   const fallbacks = discovered.filter((id) => id !== primary).slice(0, 5);
 
   if (!fallbacks.length) {
-    throw new Error(`AI model ${primary} failed: ${firstError}. No alternate free tool-capable models were discovered.`);
+    console.warn("[Nabees] No alternate tool-capable models were discovered:", firstError);
+    throw new Error("No alternate execution model is currently available.");
   }
 
   const failures = [`${primary}: ${firstError}`];
   console.warn(`[OpenRouter] Model ${primary} failed; trying up to ${fallbacks.length} free tool-capable fallback model(s).`);
 
   for (const model of fallbacks) {
-    const result = await requestModel(model, messages, tools);
+    if (options.signal?.aborted) throw new Error("Task cancelled.");
+    const result = await requestModel(model, messages, tools, options.signal);
     if (result.message) {
       console.warn(`[OpenRouter] Fallback succeeded with model ${model}.`);
       return result.message;
@@ -175,5 +180,6 @@ export async function chatCompletion(messages, tools) {
     failures.push(`${model}: ${message}`);
   }
 
-  throw new Error(`All attempted OpenRouter models failed. ${failures.join(" | ")}`);
+  console.warn("[Nabees] All model attempts failed:", failures.join(" | "));
+  throw new Error("All available execution models failed.");
 }
