@@ -35,22 +35,24 @@ After installation, the agent discovers `SKILL.md` instructions in workspace ski
 
 Tools: `list_skills`, `read_skill`, and `install_skill`.
 
-## Browser backends and network inspection
+## Browser runtime and network inspection
 
-Patchright is the default browser automation backend. It is a Playwright-compatible, Chromium-focused alternative designed to reduce common automation-detection signals. The browser adapter runs Chromium locally inside the Box and does not require a hosted browser service or a separate browser daemon. For a separately installed Chrome/Chromium instance, Nabees can connect through Chrome DevTools Protocol when you configure `BROWSER_CDP_URL`.
+Patchright is the default browser automation backend. It is Playwright-compatible and uses Chromium. The browser runtime now detects common installed system-browser paths, launches a local headless browser automatically, and can attempt to install Patchright's managed Chromium build when the managed browser executable is missing. Automatic binary installation is enabled by default and can be disabled with `BROWSER_AUTO_INSTALL=false`. It does not attempt to install operating-system packages or bypass container restrictions.
 
-Install dependencies and the Chromium build with:
+Install dependencies and the Chromium build during image/build setup for the most reliable cold start:
 
 ```sh
 npm install
 npm run browser:install
 ```
 
-The installer downloads the Chromium build used by Patchright. The Box must also provide the operating-system libraries required by Chromium. On Linux ARM64, use the Chromium build rather than the Google Chrome installer; the Chrome installer has had ARM64 limitations. Patchright can reduce some automation signals, but it does not guarantee access to every site and must not be used to bypass CAPTCHAs or other access-control challenges.
+The container still needs the OS libraries and permissions required by Chromium. A failed launch that points to missing libraries or sandbox restrictions should be fixed in the container image or by using a compatible runtime; downloading the browser binary alone cannot resolve those issues. To prefer an already-installed system browser, set `BROWSER_PREFER_SYSTEM=true`; to use a specific executable, set `BROWSER_EXECUTABLE_PATH=/absolute/path/to/chromium`. If that explicit path is invalid, Nabees reports the configuration error instead of silently choosing another binary.
 
-The browser tools support opening/navigating/listing tabs, DOM snapshots, click/type/press/scroll/wait, page-context JavaScript evaluation, native select changes, file upload, screenshots, links, images, downloads, back/forward, refresh, and tab closing. `browser_network` inspects captured requests, response status codes, failures, redacted headers, and optionally text/JSON response bodies. Body inspection is opt-in and truncated. Downloads and screenshots are saved under the configured workspace.
+Use the `browser_diagnostics` tool to inspect the runtime OS, architecture, detected browser paths, auto-install policy, and whether a remote fallback is configured. A browser launch is tested only when `browser_open` is called.
 
-To attach to a separately running Chrome/Chromium instance, launch it with remote debugging enabled and set `BROWSER_CDP_URL` to its DevTools WebSocket endpoint in `.env`. Keep the endpoint private; anyone who can access it may control the browser and inspect its logged-in session. `browser_connect_external` reports an error if no endpoint is configured or connection fails.
+The browser tools support opening/navigating/listing tabs, DOM snapshots, click/type/press/scroll/wait, page-context JavaScript evaluation, native select changes, file upload, screenshots, links, images, downloads, back/forward, refresh, tab closing, and captured request/response network inspection. `browser_network` redacts sensitive headers and optionally includes truncated text/JSON bodies. Downloads and screenshots are saved under the configured workspace.
+
+`BROWSER_CDP_URL` is optional. If local launch fails and a valid private `ws://` or `wss://` endpoint is configured, Nabees attempts to use that browser as a fallback. `browser_connect_external` remains available for explicitly attaching to a separate browser. Keep CDP endpoints private because they can grant control of the browser and access to its logged-in sessions.
 
 `BROWSER_ALLOW_LOCALHOST=false` remains the default. Browser HTTP(S) requests to private/local network targets and metadata hosts are blocked by default.
 ## Chat providers
