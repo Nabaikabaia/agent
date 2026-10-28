@@ -179,7 +179,7 @@ async function getBrowser() {
   return browserPromise;
 }
 
-async function browserDiagnostics() {
+export async function browserDiagnostics() {
   const candidates = [
     process.env.BROWSER_EXECUTABLE_PATH,
     "/usr/bin/chromium",
@@ -588,6 +588,7 @@ async function browserImages(args) {
 
 export async function executeBrowserTool(name, args) {
   switch (name) {
+    case "browser_diagnostics": return await browserDiagnostics();
     case "browser_open": return await browserOpen(args);
     case "browser_list_tabs": return await browserListTabs();
     case "browser_snapshot": return await browserSnapshot(args);
