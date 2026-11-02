@@ -1154,7 +1154,6 @@ export async function startTelegramController() {
   }
 
   await loadSharedState();
-  try { await startWhatsAppController(); } catch (error) { console.error("[Nabees WhatsApp] Startup connection unavailable:", error.message); }
   const me = await telegram("getMe");
   console.log(`Telegram controller connected as @${me.username || me.id}`);
   console.log(`Authorized owner ID: ${config.telegramOwnerId}`);
@@ -1225,6 +1224,8 @@ export async function startTelegramController() {
       { text: "Reject", data: `${CALLBACK_PREFIX}pkg:${id}:reject`, style: "danger" }
     ]);
   });
+
+  try { await startWhatsAppController(); } catch (error) { console.error("[Nabees WhatsApp] Startup connection unavailable:", error.message); }
 
   let offset = 0;
   process.on("SIGINT", () => { stopping = true; });
