@@ -5,6 +5,8 @@ Node.js autonomous agent powered by OpenRouter (configurable with an OpenAI-comp
 ## Capabilities
 
 - Natural-chat Telegram control with Rich Messages/button callbacks, dynamic choice buttons, owner-only package-install approval prompts, and Markdown profiles in `agents/*.md`.
+- Optional WhatsApp control through Baileys. Pair from Telegram with `/pair`, link the agent WhatsApp account using the returned phone-number pairing code, and authorise your personal WhatsApp number as the controller.
+- Shared Telegram/WhatsApp conversation memory, task registry, progress history, task viewing (`/view <id>`), and cancellation (`/kill <id>`). A task started on either platform can be inspected or cancelled from the other.
 - Dynamic in-message choice prompts: the agent can pause a task, ask the owner a question with 2–8 context-specific buttons, and continue using the selected answer. Prompts expire after a timeout.
 - Workspace file listing, reading, and writing.
 - Public web search and readable-page fetching.
@@ -55,6 +57,12 @@ The browser tools support opening/navigating/listing tabs, DOM snapshots, click/
 `BROWSER_CDP_URL` is optional. If local launch fails and a valid private `ws://` or `wss://` endpoint is configured, Nabees attempts to use that browser as a fallback. `browser_connect_external` remains available for explicitly attaching to a separate browser. Keep CDP endpoints private because they can grant control of the browser and access to its logged-in sessions.
 
 `BROWSER_ALLOW_LOCALHOST=false` remains the default. Browser HTTP(S) requests to private/local network targets and metadata hosts are blocked by default.
+## WhatsApp setup
+
+WhatsApp is an optional second interface to the same Nabees agent, not a separate bot brain. Install dependencies with `npm install`, start the Telegram controller, then send `/pair` in the owner's private Telegram chat. Send two international phone numbers: first the WhatsApp account to link as Nabees's account, then the personal WhatsApp number allowed to control it. On the linked account, open **WhatsApp → Linked devices → Link with phone number** and enter the code returned by Telegram. The linked account credentials are stored under `.agent-state/whatsapp-auth/`; the authorised controller number is stored in `.agent-state/whatsapp-owner.json`. Keep `.agent-state/` private and persistent across restarts.
+
+On WhatsApp, use `/tasks`, `/view <id>`, `/kill <id>`, `/status`, or `/task <request>`, or chat naturally. Conversation turns and task records are shared with Telegram. If WhatsApp disconnects, Telegram continues independently. WhatsApp messages are accepted only from the authorised private controller chat; group chats and other senders are ignored. Sensitive WhatsApp actions request explicit approval through the existing owner approval flow. Baileys is an unofficial WhatsApp Web integration and can be affected by WhatsApp changes or account restrictions; use it only with an account you control.
+
 ## Chat providers
 
 - Ordinary conversational messages (for example, greetings and general questions) use the previously shared Android ChatGPT anonymous endpoint through `src/gpt5.js`; this path does not use the OpenRouter API key or its free-model quota.
