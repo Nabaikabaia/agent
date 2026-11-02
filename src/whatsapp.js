@@ -44,6 +44,11 @@ function publicTrigger(message,text) {
   return Boolean((quotedId && outboundMessageIds.has(quotedId)) || /(^|[^a-z0-9])nabees([^a-z0-9]|$)/i.test(text));
 }
 function isOwnerDirectChat(jid) { return jid===ownerJid; }
+function taskIdPreference(text) {
+  if (/\b(?:don't|do not|stop|no longer)\s+(?:include|send|show|display)\s+(?:the\s+)?task\s*ids?\b/i.test(text)) return false;
+  if (/\b(?:please\s+)?(?:include|send|show|display)\s+(?:the\s+)?task\s*ids?\b/i.test(text)) return true;
+  return null;
+}
 function ownerRuleRequest(text) {
   return text.match(/^(?:hey\s+)?nabees[, ]+(?:remember|save|set)\s+(?:this\s+)?(?:whatsapp\s+)?rule\s*:\s*([\s\S]{5,1000})$/i)?.[1]?.trim() || "";
 }
@@ -216,7 +221,8 @@ async function runWhatsAppTask(jid, task, quotedMessage = null) {
     cancelRequested: false
   };
   await registerTaskSession(session);
-  await sendText(jid, "Nabees is on it. Task ID: " + session.id + "\nUse /view " + session.id + " to follow progress.", quotedMessage);
+  const showTaskIds = chatAccess.showTaskIds !== false;
+  await sendText(jid, showTaskIds ? "Nabees is on it. Task ID: " + session.id + "\nUse /view " + session.id + " to follow progress." : "Nabees is on it. I’ll send you the result when it’s ready.", quotedMessage);
   try {
     const result = await runAgent(task, {
       profile: session.profile,
@@ -231,7 +237,7 @@ async function runWhatsAppTask(jid, task, quotedMessage = null) {
       result.status === "failed" ? "failed" :
       result.status === "step_limit" ? "paused" : "completed";
     await finishTaskSession(session.id, status, result.answer || "");
-    await sendText(jid, (result.answer || "Task finished without a response.") + "\n\nTask ID: " + session.id, quotedMessage);
+    await sendText(jid, (result.answer || "Task finished without a response.") + (showTaskIds ? "\n\nTask ID: " + session.id : ""), quotedMessage);
   } catch (error) {
     await finishTaskSession(session.id, "failed", "Task failed.");
     console.error("[Nabees WhatsApp] Agent task failed:", error.message);
@@ -249,6 +255,14 @@ async function handleIncomingMessage(message) {
   if(message.key.fromMe && outboundMessageIds.has(message.key.id)) return;
   const match=text.match(/^\/(agent|mode|help|start|status|tasks|view|taskstatus|kill|killtask|task)(?:\s+([\s\S]*))?$/i);
   const cmd=match?.[1]?.toLowerCase(), arg=match?.[2]?.trim()||"";
+
+  if(isOwner && ownerDm) {
+    const taskIds=taskIdPreference(text);
+    if(taskIds!==null) {
+      chatAccess.showTaskIds=taskIds; await saveChatAccess();
+      return sendText(jid, taskIds ? "Task IDs will be included in WhatsApp task updates again." : "Understood. I’ll stop including task IDs in WhatsApp task updates.");
+    }
+  }
 
   if(isOwner) {
     const requestedRule=ownerRuleRequest(text);
