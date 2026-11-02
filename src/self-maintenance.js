@@ -1,5 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import os from "node:os";
 import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
@@ -85,12 +86,13 @@ export async function executeSelfMaintenanceTool(name, args) {
 
   const id = Date.now().toString(36) + "-" + randomBytes(3).toString("hex");
   const upgradeRoot = path.join(STATE_ROOT, id);
-  const worktree = path.join(upgradeRoot, "worktree");
+  const worktree = path.join(os.tmpdir(), "nabees-self-upgrade-" + id);
   await fs.mkdir(upgradeRoot, { recursive: true, mode: 0o700 });
   const added = await run("git", ["worktree", "add", "--detach", worktree, "HEAD"], SOURCE_ROOT, 60000);
   if (added.code !== 0) throw new Error("Could not create isolated upgrade worktree: " + added.stderr.slice(0, 1500));
 
   try {
+    try { await fs.access(path.join(SOURCE_ROOT, "node_modules")); await fs.symlink(path.join(SOURCE_ROOT, "node_modules"), path.join(worktree, "node_modules"), "junction"); } catch (error) { if (error.code !== "ENOENT" && error.code !== "EACCES") throw error; }
     for (const item of files) {
       const target = path.join(worktree, item.path);
       await fs.mkdir(path.dirname(target), { recursive: true });
@@ -156,6 +158,6 @@ export async function executeSelfMaintenanceTool(name, args) {
     }
     return { staged: true, applied: true, status: "applied_restart_required", id, files: files.map(item => item.path), testReport, message: "Verified source files were applied. The current process was not restarted; arrange a controlled restart to load the new code." };
   } finally {
-    // Keep the isolated worktree and report for review/rollback. They live under .agent-state/self-upgrades.
+    // Keep the isolated worktree and report for review/rollback; the worktree lives outside the source checkout.
   }
 }
