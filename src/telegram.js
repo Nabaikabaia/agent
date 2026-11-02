@@ -9,7 +9,7 @@ import { listProfiles, loadProfile } from "./profiles.js";
 import { registerChoicePromptSender, resolveUserChoice } from "./interaction.js";
 import { initializePackageApprovals, registerPackageApprovalNotifier, decidePackageApproval } from "./approvals.js";
 import { executeTool, registerTelegramPhotoSender, registerTelegramDocumentSender, registerTelegramVideoSender } from "./tools.js";
-import { activeTasks, loadSharedState, getConversationHistory, appendConversationTurns, registerTaskSession, updateTaskProgress, finishTaskSession, getTaskRecord } from "./shared-state.js";
+import { activeTasks, loadSharedState, getConversationHistory, appendConversationTurns, registerTaskSession, updateTaskProgress, finishTaskSession, getTaskRecord, listDelegatedTasks } from "./shared-state.js";
 import { pairWhatsApp, startWhatsAppController } from "./whatsapp.js";
 
 const API = () => `https://api.telegram.org/bot${config.telegramBotToken}`;
@@ -682,7 +682,7 @@ Active profile: **${selectedProfile}**
 - /agent <name> — switch agent profile
 - /agents — list profiles
 - /task <task> — start a task
-- /tasks — list running tasks and IDs
+- /tasks — list delegated subagent tasks and IDs
 - /view <id> — view task progress
 - /kill <id> — stop a running task
 - /pair <number> — connect your WhatsApp account
@@ -953,7 +953,12 @@ async function handleMessage(message, taskOptions = {}) {
     return;
   }
   if (name === "tasks") {
-    await sendRich(chatId, statusText(), menuButtons());
+    const tasks = listDelegatedTasks();
+    const running = tasks.filter(item => item.status === "running");
+    const body = running.length
+      ? "**" + running.length + " delegated task(s) running**\\n\\n" + running.map((item, index) => "**" + (index + 1) + ". " + item.id + "** — " + (item.agentName || item.profile) + "\\n" + item.task.slice(0, 280) + "\\nLatest: " + (item.progress || []).at(-1)).join("\\n\\n")
+      : "No delegated tasks are running right now.";
+    await sendRich(chatId, body, menuButtons());
     return;
   }
   if (name === "view" || name === "taskstatus") {
