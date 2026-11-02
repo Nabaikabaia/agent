@@ -675,7 +675,7 @@ function isGroup(chat) {
 }
 
 function helpText() {
-  return `Nabees Agent is connected. Chat normally and your message will be treated as a task.
+  return `Nabees is connected. Chat naturally; only substantial work delegated to a specialist becomes a tracked task.
 
 Active profile: **${selectedProfile}**
 
@@ -710,7 +710,7 @@ function statusText(groupView = false) {
       : "Nabees Agent is idle and ready.";
   }
   if (!activeTasks.size) return `Agent is idle and ready for a task.\n\nActive profile: **${selectedProfile}**`;
-  const running = [...activeTasks.values()];
+  const running = [...activeTasks.values()].filter(item => item.kind !== "delegated");
   return `**${running.length} task${running.length === 1 ? "" : "s"} running**
 
 ${running.map((session, index) => `**${index + 1}. ${session.id}** — ${session.profile}\nStarted: ${session.startedAt}\n${session.task.slice(0, 350)}`).join("\n\n")}
@@ -1037,8 +1037,9 @@ async function handleMessage(message, taskOptions = {}) {
     await sendRich(chatId, "Tell me what to do, for example: `/task Inspect the workspace and summarize its files.`", menuButtons());
     return;
   }
-  if (activeTasks.size >= MAX_CONCURRENT_TASKS) {
-    await sendRich(chatId, `Nabees is already running ${activeTasks.size} tasks, the current concurrency limit. Check /tasks or wait for one to finish before starting another.`, menuButtons());
+  const activeRequests = [...activeTasks.values()].filter(item => item.kind !== "delegated").length;
+  if (activeRequests >= MAX_CONCURRENT_TASKS) {
+    await sendRich(chatId, `Nabees is already handling ${activeRequests} direct requests, the current concurrency limit. Delegated work can continue independently. Check /tasks or wait for one request to finish.`, menuButtons());
     return;
   }
   const session = {
