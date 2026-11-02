@@ -73,7 +73,10 @@ async function connectSocket() {
     });
     setWhatsAppSocket(sock);
     setWhatsAppConnectionState("connecting");
-    sock.ev.on("creds.update", async () => {\n      accountRegistered = Boolean(state.creds?.registered);\n      await saveCreds();\n    });
+    sock.ev.on("creds.update", async () => {
+      accountRegistered = Boolean(state.creds?.registered);
+      await saveCreds();
+    });
     sock.ev.on("connection.update", update => {
       if (update.connection === "open") {
         setWhatsAppConnectionState("connected");
