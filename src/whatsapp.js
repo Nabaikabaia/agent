@@ -16,6 +16,7 @@ let reconnectTimer = null;
 let stopping = false;
 let ownerJid = "";
 let accountRegistered = false;
+let lastDisconnectReason = "";
 
 function normalizeNumber(value) {
   const digits = String(value || "").replace(/\D/g, "");
@@ -79,13 +80,17 @@ async function connectSocket() {
     });
     sock.ev.on("connection.update", update => {
       if (update.connection === "open") {
+        lastDisconnectReason = "";
         setWhatsAppConnectionState("connected");
         console.log("[Nabees WhatsApp] Connected.");
       } else if (update.connection === "close") {
         setWhatsAppConnectionState("disconnected");
         setWhatsAppSocket(null);
         connectPromise = null;
-        const statusCode = update.lastDisconnect?.error?.output?.statusCode;
+        const disconnectError = update.lastDisconnect?.error;
+        const statusCode = disconnectError?.output?.statusCode;
+        lastDisconnectReason = disconnectError?.message || (statusCode ? `WhatsApp closed the connection (status ${statusCode}).` : "WhatsApp closed the connection without a reason.");
+        console.warn("[Nabees WhatsApp] Connection closed:", lastDisconnectReason);
         if (!stopping && statusCode !== lib.DisconnectReason?.loggedOut) {
           clearTimeout(reconnectTimer);
           reconnectTimer = setTimeout(() => {
@@ -228,13 +233,34 @@ async function handleIncomingMessage(message) {
   return runWhatsAppTask(remoteJid, text);
 }
 
-export async function pairWhatsApp(linkedAccountNumber, controllerNumber) {
-  const linkedNumber = normalizeNumber(linkedAccountNumber);
-  await saveOwner(controllerNumber);
+export async function pairWhatsApp(phoneNumber) {
+  const linkedNumber = normalizeNumber(phoneNumber);
+  if (accountRegistered) {
+    throw new Error("A WhatsApp session is already registered. To link a different number, log out the existing linked device first.");
+  }
+
+  stopping = false;
+  clearTimeout(reconnectTimer);
   const sock = await connectSocket();
-  if (accountRegistered) throw new Error("A WhatsApp account is already paired. Log it out before pairing another account.");
-  const code = await sock.requestPairingCode(linkedNumber);
-  return { code: String(code).match(/.{1,4}/g)?.join("-") || String(code), linkedAccount: linkedNumber, controller: ownerJid };
+  await new Promise(resolve => setTimeout(resolve, 1200));
+  if (getWhatsAppSocket() !== sock || getWhatsAppConnectionState() === "disconnected") {
+    throw new Error(lastDisconnectReason || "WhatsApp disconnected before the pairing code could be requested. Check outbound WebSocket access and try again.");
+  }
+
+  let code;
+  try {
+    code = await sock.requestPairingCode(linkedNumber);
+  } catch (error) {
+    const reason = lastDisconnectReason ? ` WhatsApp disconnect reason: ${lastDisconnectReason}` : "";
+    throw new Error(`Baileys could not request a pairing code: ${error?.message || String(error)}.${reason}`);
+  }
+
+  await saveOwner(linkedNumber);
+  return {
+    code: String(code).match(/.{1,4}/g)?.join("-") || String(code),
+    linkedAccount: linkedNumber,
+    controller: ownerJid
+  };
 }
 
 export async function startWhatsAppController() {
