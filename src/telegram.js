@@ -1080,6 +1080,8 @@ async function handleMessage(message, taskOptions = {}) {
       profile: session.profile,
       history: session.history,
       signal: session.abortController.signal,
+      taskId: session.id,
+      chatId,
       onProgress: (event) => {
         if (event.message) void updateTaskProgress(session.id, event.message);
         if (event.type === "tool_start" || event.type === "model_start") {
