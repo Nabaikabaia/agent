@@ -33,6 +33,8 @@ export const config = {
     : (process.env.OPENROUTER_API_KEY || process.env.AI_API_KEY || process.env.OXION_API_KEY || ""),
   telegramBotToken: process.env.TELEGRAM_BOT_TOKEN || "",
   telegramOwnerId: process.env.TELEGRAM_OWNER_ID || "",
+  whatsappEnabled: process.env.WHATSAPP_ENABLED !== "false",
+  whatsappOwnerJid: process.env.WHATSAPP_OWNER_JID || "",
   githubToken: process.env.GITHUB_TOKEN || "",
   baseUrl: (isInception
     ? (process.env.INCEPTION_BASE_URL || "https://api.inceptionlabs.ai/v1")
