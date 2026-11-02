@@ -40,7 +40,12 @@ function contextInfo(message) {
     m.documentMessage?.contextInfo||m.audioMessage?.contextInfo||m.stickerMessage?.contextInfo||null;
 }
 function publicTrigger(message,text) {
-  return Boolean(contextInfo(message)?.stanzaId) || /(^|[^a-z0-9])nabees([^a-z0-9]|$)/i.test(text);
+  const quotedId=contextInfo(message)?.stanzaId;
+  return Boolean((quotedId && outboundMessageIds.has(quotedId)) || /(^|[^a-z0-9])nabees([^a-z0-9]|$)/i.test(text));
+}
+function isOwnerDirectChat(jid) { return jid===ownerJid; }
+function ownerRuleRequest(text) {
+  return text.match(/^(?:hey\s+)?nabees[, ]+(?:remember|save|set)\s+(?:this\s+)?(?:whatsapp\s+)?rule\s*:\s*([\s\S]{5,1000})$/i)?.[1]?.trim() || "";
 }
 
 
@@ -206,7 +211,7 @@ async function runWhatsAppTask(jid, task, quotedMessage = null) {
     profile: "general",
     source: "whatsapp",
     startedAt: new Date().toISOString(),
-    history: getConversationHistory(30),
+    history: jid===ownerJid ? getConversationHistory(30) : [],
     abortController: new AbortController(),
     cancelRequested: false
   };
@@ -221,7 +226,7 @@ async function runWhatsAppTask(jid, task, quotedMessage = null) {
         if (event.message) void updateTaskProgress(session.id, event.message);
       }
     });
-    await appendConversationTurns(task, result.answer || "", "whatsapp");
+    if(jid===ownerJid) await appendConversationTurns(task, result.answer || "", "whatsapp");
     const status = session.cancelRequested || result.status === "cancelled" ? "cancelled" :
       result.status === "failed" ? "failed" :
       result.status === "step_limit" ? "paused" : "completed";
@@ -240,6 +245,7 @@ async function handleIncomingMessage(message) {
   if(!jid || jid==="status@broadcast" || jid.endsWith("@newsletter")) return;
   const text=extractText(message);
   const isOwner=ownerMessage(message);
+  const ownerDm=isOwnerDirectChat(jid);
   if(message.key.fromMe && outboundMessageIds.has(message.key.id)) return;
   const match=text.match(/^\/(agent|mode|help|start|status|tasks|view|taskstatus|kill|killtask|task)(?:\s+([\s\S]*))?$/i);
   const cmd=match?.[1]?.toLowerCase(), arg=match?.[2]?.trim()||"";
@@ -263,8 +269,8 @@ async function handleIncomingMessage(message) {
     return sendText(jid,"Nabees mode for this chat is now "+mode+".");
   }
 
-  if(isOwner && cmd && chatSettings(jid).enabled) {
-    if(cmd==="help"||cmd==="start") return sendText(jid,"Nabees is active here. /agent off; /mode public; /mode private; /tasks; /view <id>; /kill <id>; /task <request>.");
+  if(isOwner && cmd && (chatSettings(jid).enabled || ownerDm)) {
+    if(cmd==="help"||cmd==="start") return sendText(jid,"I'm here. Just message me normally in this private chat. In other chats use /agent on, then /mode public or /mode private. /tasks; /view <id>; /kill <id>; /task <request>.");
     if(cmd==="status"||cmd==="tasks") {
       const running=listTaskRecords({includeCompleted:false});
       return sendText(jid,running.length?"**"+running.length+" task(s) running**\n\n"+running.map(x=>x.id+" — "+x.task.slice(0,180)).join("\n\n"):"Nabees is idle.");
@@ -274,14 +280,38 @@ async function handleIncomingMessage(message) {
     if(cmd==="task") return arg?runWhatsAppTask(jid,arg):sendText(jid,"Use /task <request>.");
   }
 
-  // The paired owner can configure chats but is never answered by the agent.
-  if(isOwner || !text) return;
+  if(!text) return;
+  // The owner's one-to-one chat is the natural control room: no wake word or
+  // activation command is needed there.
+  if(ownerDm) {
+    const requestedRule=ownerRuleRequest(text);
+    if(requestedRule) {
+      chatAccess.globalRules=[...(chatAccess.globalRules||[]),requestedRule].slice(-30);
+      await saveChatAccess();
+      return sendText(jid,"Saved. I'll apply that WhatsApp rule from now on.");
+    }
+    if(cmd) return;
+  }
   const settings=chatSettings(jid);
-  if(!settings.enabled) return;
-  if(settings.mode==="public" && !publicTrigger(message,text)) return;
+  if(!ownerDm && !settings.enabled) return;
+  if(!ownerDm && settings.mode==="public" && !publicTrigger(message,text)) return;
+  // In groups, the owner can also address Nabees by replying to one of its
+  // tracked messages or explicitly mentioning Nabees.
   const sender=message.key.participant||jid;
-  if(sender===ownerJid) return;
-  const prompt=["WhatsApp "+(jid.endsWith("@g.us")?"group":"private chat"),"Sender: "+sender,"Mode: "+settings.mode,"Reply naturally to this message. Do not reveal internal identifiers.",text].join("\n");
+  const prompt=[
+    "WhatsApp "+(jid.endsWith("@g.us")?"group":"private chat"),
+    "Sender: "+sender,
+    "Mode: "+(ownerDm?"owner-private":settings.mode),
+    "WhatsApp safety and privacy rules:",
+    "Never disclose passwords, API keys, authentication codes, private credentials, private personal information, confidential business information, or secrets in a group. If asked for something sensitive in a group, politely say it can only be handled in the owner's private chat. Do not repeat the sensitive content in the group.",
+    "Do not assume every group message is addressed to you. Only respond when the owner-private chat is active, or in other chats when the activation mode permits it.",
+    "Owner-defined WhatsApp rules:",
+    ...(chatAccess.globalRules||[]),
+    ...(settings.rules||[]),
+    "Reply naturally to this message. Do not reveal internal identifiers.",
+    "Message:",
+    text
+  ].join("\n");
   return runWhatsAppTask(jid,prompt,message);
 }
 
