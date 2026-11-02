@@ -9,42 +9,18 @@ import { listProfiles, loadProfile } from "./profiles.js";
 import { registerChoicePromptSender, resolveUserChoice } from "./interaction.js";
 import { initializePackageApprovals, registerPackageApprovalNotifier, decidePackageApproval } from "./approvals.js";
 import { executeTool, registerTelegramPhotoSender, registerTelegramDocumentSender } from "./tools.js";
+import { activeTasks, loadSharedState, getConversationHistory, appendConversationTurns, registerTaskSession, updateTaskProgress, finishTaskSession, getTaskRecord } from "./shared-state.js";
+import { pairWhatsApp, startWhatsAppController } from "./whatsapp.js";
 
 const API = () => `https://api.telegram.org/bot${config.telegramBotToken}`;
 const MAX_MESSAGE_LENGTH = 3900;
 const CALLBACK_PREFIX = "na:";
 const MAX_CONCURRENT_TASKS = 4;
 let activeTask = null;
-const activeTasks = new Map();
 let selectedProfile = "general";
-let conversationHistory = [];
-const conversationMemoryPath = path.join(config.stateDir, "conversation-history.json");
 let stopping = false;
+let pendingWhatsAppPairing = false;
 
-async function loadConversationHistory() {
-  await fs.mkdir(config.stateDir, { recursive: true });
-  try {
-    const parsed = JSON.parse(await fs.readFile(conversationMemoryPath, "utf8"));
-    if (!Array.isArray(parsed)) return [];
-    return parsed
-      .filter((item) => item && ["user", "assistant"].includes(item.role) && typeof item.content === "string")
-      .slice(-40);
-  } catch (error) {
-    if (error.code === "ENOENT") return [];
-    console.error("Could not load shared conversation memory:", error.message);
-    return [];
-  }
-}
-
-async function saveConversationHistory() {
-  await fs.mkdir(config.stateDir, { recursive: true });
-  const safeHistory = conversationHistory
-    .filter((item) => item && ["user", "assistant"].includes(item.role) && typeof item.content === "string")
-    .slice(-40);
-  const temporary = conversationMemoryPath + "." + randomUUID() + ".tmp";
-  await fs.writeFile(temporary, JSON.stringify(safeHistory, null, 2), { mode: 0o600 });
-  await fs.rename(temporary, conversationMemoryPath);
-}
 const pendingFollowups = new Map();
 
 function describeError(error) {
@@ -708,7 +684,9 @@ Active profile: **${selectedProfile}**
 - /agents — list profiles
 - /task <task> — start a task
 - /tasks — list running tasks and IDs
+- /view <id> — view task progress
 - /kill <id> — stop a running task
+- /pair — connect a WhatsApp account
 - /clearworkspace — clear workspace files (asks for confirmation)
 - Send a file here to analyse it
 - /status — check progress
@@ -966,6 +944,16 @@ async function handleMessage(message, taskOptions = {}) {
     await sendRich(chatId, "This agent is private and is not authorized for this account.");
     return;
   }
+  if (pendingWhatsAppPairing && !name) {
+    pendingWhatsAppPairing = false;
+    const numbers = String(text || "").match(/\d{8,15}/g) || [];
+    if (numbers.length < 2) { await sendRich(chatId, "I need both numbers. Send the linked WhatsApp account number and your control number, with country codes.", menuButtons()); return; }
+    try {
+      const paired = await pairWhatsApp(numbers[0], numbers[1]);
+      await sendRich(chatId, "**WhatsApp pairing code**\n\n" + paired.code + "\n\nOn the linked account, open WhatsApp → Linked devices → Link with phone number and enter this code. Keep this code private.", menuButtons());
+    } catch (error) { await sendRich(chatId, "WhatsApp pairing could not be started: " + error.message, menuButtons()); }
+    return;
+  }
 
   if (name === "start" || name === "help") {
     await sendRich(chatId, helpText(), menuButtons());
@@ -977,6 +965,28 @@ async function handleMessage(message, taskOptions = {}) {
   }
   if (name === "tasks") {
     await sendRich(chatId, statusText(), menuButtons());
+    return;
+  }
+  if (name === "view" || name === "taskstatus") {
+    if (!argument) { await sendRich(chatId, "Sir, provide a task ID: /view <id>", menuButtons()); return; }
+    const record = getTaskRecord(argument);
+    if (!record) { await sendRich(chatId, "No task record was found for " + argument + ".", menuButtons()); return; }
+    const detail = ["**Task " + record.id + "** — " + record.status, "Source: " + (record.source || "unknown"), "Started: " + record.startedAt, "Request: " + String(record.task || "").slice(0, 500), "", "**Recent progress**", ...(record.progress || []).slice(-15).map(item => "• " + item), record.answer ? "\n**Result**\n" + record.answer.slice(0, 2500) : ""].join("\n");
+    await sendRich(chatId, detail, menuButtons());
+    return;
+  }
+  if (name === "pair") {
+    if (!argument) {
+      pendingWhatsAppPairing = true;
+      await sendRich(chatId, "Sir, send two international phone numbers separated by a space:\n1. The WhatsApp number to link to Nabees (the agent account).\n2. Your personal WhatsApp number that will be authorised to control Nabees.\n\nExample: 2348012345678 2348098765432", menuButtons());
+      return;
+    }
+    const numbers = argument.match(/\d{8,15}/g) || [];
+    if (numbers.length < 2) { await sendRich(chatId, "Use /pair <linked-account-number> <your-control-number>, both with country code and digits only.", menuButtons()); return; }
+    try {
+      const paired = await pairWhatsApp(numbers[0], numbers[1]);
+      await sendRich(chatId, "**WhatsApp pairing code**\n\n" + paired.code + "\n\nOn the linked account, open WhatsApp → Linked devices → Link with phone number and enter this code. Keep this code private.", menuButtons());
+    } catch (error) { await sendRich(chatId, "WhatsApp pairing could not be started: " + error.message, menuButtons()); }
     return;
   }
   if (name === "kill" || name === "killtask") {
@@ -1041,20 +1051,23 @@ async function handleMessage(message, taskOptions = {}) {
   }
   const session = {
     id: randomUUID().slice(0, 8),
+    source: "telegram",
     task,
     profile: selectedProfile,
     startedAt: new Date().toISOString(),
-    history: conversationHistory.slice(-20),
+    history: getConversationHistory(20),
     abortController: new AbortController(),
     cancelRequested: false
   };
-  activeTasks.set(session.id, session);
+  await registerTaskSession(session);
   activeTask = session;
   const progressEvents = [`Task session ${session.id} received.`];
   const draftId = Math.max(1, Date.now() % 2147483647);
   let progressTimer = null;
   let draftUpdateBusy = false;
   let draftAvailable = false;
+  let taskStatus = "failed";
+  let taskAnswer = "";
   const updateDraft = async (eventText = "") => {
     if (eventText) {
       progressEvents.push(eventText);
@@ -1081,6 +1094,7 @@ async function handleMessage(message, taskOptions = {}) {
       history: session.history,
       signal: session.abortController.signal,
       onProgress: (event) => {
+        if (event.message) void updateTaskProgress(session.id, event.message);
         if (event.type === "tool_start" || event.type === "model_start") {
           void updateDraft(event.message || draftLabelForTask(task));
         } else if (event.type === "tool_done") {
@@ -1091,8 +1105,9 @@ async function handleMessage(message, taskOptions = {}) {
       }
     });
     if (Array.isArray(result.history)) session.history = result.history.slice(-40);
-    conversationHistory = [...conversationHistory, { role: "user", content: task }, { role: "assistant", content: result.answer || "" }].slice(-40);
-    await saveConversationHistory();
+    taskAnswer = result.answer || "";
+    taskStatus = result.status === "cancelled" || session.cancelRequested ? "cancelled" : result.status === "failed" ? "failed" : result.status === "step_limit" ? "paused" : "completed";
+    await appendConversationTurns(task, taskAnswer, "telegram");
     if (progressTimer) clearInterval(progressTimer);
     progressTimer = null;
 
@@ -1116,10 +1131,12 @@ async function handleMessage(message, taskOptions = {}) {
     if (progressTimer) clearInterval(progressTimer);
     progressTimer = null;
     progressEvents.push("Execution needs attention.");
-    await sendRichHtml(chatId, progressMessage(task, session.profile, progressEvents, "failed", "Sir, I hit an execution issue. The technical details are in the server log."));
+    taskStatus = "failed";
+    taskAnswer = "Sir, I hit an execution issue. The technical details are in the server log.";
+    await sendRichHtml(chatId, progressMessage(task, session.profile, progressEvents, "failed", taskAnswer));
   } finally {
     if (progressTimer) clearInterval(progressTimer);
-    activeTasks.delete(session.id);
+    await finishTaskSession(session.id, taskStatus, taskAnswer);
     activeTask = [...activeTasks.values()].at(-1) || null;
   }
 }
@@ -1137,7 +1154,7 @@ export async function startTelegramController() {
     throw new Error("TELEGRAM_OWNER_ID must be your numeric Telegram user ID.");
   }
 
-  conversationHistory = await loadConversationHistory();
+  await loadSharedState();
   const me = await telegram("getMe");
   console.log(`Telegram controller connected as @${me.username || me.id}`);
   console.log(`Authorized owner ID: ${config.telegramOwnerId}`);
@@ -1208,6 +1225,8 @@ export async function startTelegramController() {
       { text: "Reject", data: `${CALLBACK_PREFIX}pkg:${id}:reject`, style: "danger" }
     ]);
   });
+
+  try { await startWhatsAppController(); } catch (error) { console.error("[Nabees WhatsApp] Startup connection unavailable:", error.message); }
 
   let offset = 0;
   process.on("SIGINT", () => { stopping = true; });
