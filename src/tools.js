@@ -11,6 +11,7 @@ import { whatsappToolDefinitions, executeWhatsAppTool } from "./whatsapp/tools.j
 const MAX_OUTPUT = 30_000;
 let telegramPhotoSender = null;
 let telegramDocumentSender = null;
+let telegramVideoSender = null;
 
 export function registerTelegramPhotoSender(sender) {
   telegramPhotoSender = sender;
@@ -18,6 +19,10 @@ export function registerTelegramPhotoSender(sender) {
 
 export function registerTelegramDocumentSender(sender) {
   telegramDocumentSender = sender;
+}
+
+export function registerTelegramVideoSender(sender) {
+  telegramVideoSender = sender;
 }
 
 async function sendTelegramDocument(args) {
@@ -48,6 +53,18 @@ async function sendTelegramPhoto(args) {
   if (stat.size > 10 * 1024 * 1024) throw new Error("Image exceeds Telegram's 10 MB sendPhoto limit.");
   return await telegramPhotoSender({ filePath: file, caption: String(args.caption || "").slice(0, 900) });
 }
+async function sendTelegramVideo(args) {
+  if (!telegramVideoSender) throw new Error("Telegram video delivery is not initialized.");
+  const file = safePath(args.path);
+  const ext = path.extname(file).toLowerCase();
+  const mime = ({ ".mp4": "video/mp4", ".mov": "video/quicktime", ".m4v": "video/mp4", ".webm": "video/webm" })[ext];
+  if (!mime) throw new Error("Only MP4, MOV, M4V, and WEBM videos can be sent to Telegram.");
+  const stat = await fs.stat(file);
+  if (!stat.isFile()) throw new Error("Video path is not a file.");
+  if (stat.size > 45 * 1024 * 1024) throw new Error("Video exceeds Telegram's 45 MB send limit.");
+  return await telegramVideoSender({ filePath: file, caption: String(args.caption || "").slice(0, 900), mime });
+}
+
 const DEFAULT_TIMEOUT_MS = 120_000;
 const COMMANDS = new Set([
   "node", "npm", "npx", "pnpm", "yarn", "bun", "git", "python", "python3", "pip", "pip3",
@@ -96,6 +113,7 @@ export const toolDefinitions = [
   { type: "function", function: { name: "browser_screenshot", description: "Capture a screenshot of the current page and save it under workspace/browser-screenshots. Use this to preserve visual evidence.", parameters: { type: "object", properties: { tab_id: { type: "string" }, full_page: { type: "boolean" } }, required: ["tab_id"], additionalProperties: false } } },
   { type: "function", function: { name: "send_telegram_photo", description: "Send an existing PNG, JPEG, or WEBP image from the configured workspace to the configured Telegram owner as a photo. Use after browser_screenshot when the user asks you to send the screenshot/image. Provide the relative workspace path returned by the screenshot tool.", parameters: { type: "object", properties: { path: { type: "string" }, caption: { type: "string", maxLength: 900 } }, required: ["path"], additionalProperties: false } } },
   { type: "function", function: { name: "send_telegram_document", description: "Send a file from the configured workspace to the configured Telegram owner as a downloadable document. Use when the owner asks to fetch, export, or send a generated/downloaded file in chat. Path must be relative to the workspace; secret files and private keys are blocked; maximum 45 MB.", parameters: { type: "object", properties: { path: { type: "string" }, caption: { type: "string", maxLength: 900 } }, required: ["path"], additionalProperties: false } } },
+  { type: "function", function: { name: "send_telegram_video", description: "Send an existing MP4, MOV, M4V, or WEBM video from the workspace to the configured Telegram owner as native video media. Maximum 45 MB.", parameters: { type: "object", properties: { path: { type: "string" }, caption: { type: "string", maxLength: 900 } }, required: ["path"], additionalProperties: false } } },
   { type: "function", function: { name: "browser_evaluate", description: "Run JavaScript in the current webpage context for DOM inspection or ordinary page interaction. This does not run in Node.js and cannot directly access the agent filesystem or environment. Never use it to defeat access controls or anti-abuse systems.", parameters: { type: "object", properties: { tab_id: { type: "string" }, script: { type: "string" } }, required: ["tab_id", "script"], additionalProperties: false } } },
 
   { type: "function", function: { name: "browser_wait", description: "Wait for a CSS selector, text, or page load state, or pause briefly for dynamic content. Prefer condition-based waits over fixed sleeps.", parameters: { type: "object", properties: { tab_id: { type: "string" }, selector: { type: "string" }, text: { type: "string" }, state: { type: "string", enum: ["visible", "hidden", "attached", "detached", "load", "domcontentloaded", "networkidle"] }, timeout_ms: { type: "integer", minimum: 500, maximum: 60000 }, wait_ms: { type: "integer", minimum: 0, maximum: 10000 } }, required: ["tab_id"], additionalProperties: false } } },
@@ -539,6 +557,7 @@ export async function executeTool(name, args, options = {}) {
     case "ask_user": return await requestUserChoice(args);
     case "send_telegram_photo": return await sendTelegramPhoto(args);
     case "send_telegram_document": return await sendTelegramDocument(args);
+    case "send_telegram_video": return await sendTelegramVideo(args);
     case "whatsapp_discover_api":
     case "whatsapp_list_capabilities":
     case "whatsapp_register_capability":
