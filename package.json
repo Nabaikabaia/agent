@@ -10,12 +10,13 @@
   "scripts": {
     "start": "node src/index.js",
     "test": "node --test test/*.test.js",
-    "check": "node --check src/index.js && node --check src/agent.js && node --check src/gpt5.js && node --check src/oxion.js && node --check src/tools.js && node --check src/browser.js && node --check src/config.js && node --check src/telegram.js && node --check src/profiles.js && node --check src/interaction.js && node --check src/approvals.js && node --check src/skills.js",
+    "check": "node --check src/index.js && node --check src/agent.js && node --check src/gpt5.js && node --check src/oxion.js && node --check src/tools.js && node --check src/browser.js && node --check src/config.js && node --check src/telegram.js && node --check src/profiles.js && node --check src/interaction.js && node --check src/approvals.js && node --check src/skills.js && node --check src/shared-state.js && node --check src/whatsapp.js && node --check src/whatsapp/tools.js && node --check src/whatsapp/socket-state.js",
     "telegram": "node src/telegram.js",
     "browser:install": "patchright install chromium"
   },
   "dependencies": {
     "patchright": "^1.64.1",
-    "officeparser": "^6.0.7"
+    "officeparser": "^6.0.7",
+    "@whiskeysockets/baileys": "7.0.0-rc14"
   }
 }
