@@ -7,7 +7,7 @@ Node.js autonomous agent powered by OpenRouter (configurable with an OpenAI-comp
 - Natural-chat Telegram control with Rich Messages/button callbacks, dynamic choice buttons, owner-only package-install approval prompts, and Markdown profiles in `agents/*.md`.
 - Optional WhatsApp control through Baileys. Pair from Telegram with `/pair`, link the agent WhatsApp account using the returned phone-number pairing code, and authorise your personal WhatsApp number as the controller.
 - Self-extending Baileys capability registry: Nabees can inspect the installed socket API, research a missing method, register a reusable capability after owner approval, and execute mutating methods only after a separate confirmation.
-- Shared Telegram/WhatsApp conversation memory, task registry, progress history, task viewing (`/view <id>`), and cancellation (`/kill <id>`). A task started on either platform can be inspected or cancelled from the other.
+- Shared Telegram/WhatsApp conversation memory and a delegated-task registry. Only work Nabees assigns to a specialist subagent becomes a tracked task with its own ID, specialist, parent, progress, result and cancellation signal. Use `/tasks`, `/view <id>` and `/kill <id>`; natural-language questions such as “how many tasks are running?” are handled by the task manager. Parent conversations are not counted as delegated tasks.
 - Dynamic in-message choice prompts: the agent can pause a task, ask the owner a question with 2–8 context-specific buttons, and continue using the selected answer. Prompts expire after a timeout.
 - Workspace file listing, reading, and writing.
 - Public web search and readable-page fetching.
@@ -19,7 +19,7 @@ Node.js autonomous agent powered by OpenRouter (configurable with an OpenAI-comp
 - GitHub REST API access for repositories, contents, commits, issues, pull requests, releases, and search.
 - Owner-requested private-repository updates using `GITHUB_TOKEN`, with fixed-origin validation, a clean-working-tree check, and fast-forward-only pulls.
 - Project-local package installation with npm, pnpm, yarn, or bun.
-- Controlled one-command-at-a-time execution for development, tests, builds, and Git inspection.
+- Controlled one-command-at-a-time execution for development, tests, builds, and Git inspection. One-off operations should use inline CLI execution (for example `node -e` or `python -c`) rather than creating disposable script files; persistent files are created when the deliverable genuinely needs them.
 - Local task checkpoints and short-lived conversational context. Agent work automatically continues across up to three batches when it reaches `AGENT_MAX_STEPS`, with a maximum of 60 model steps per task.
 
 
