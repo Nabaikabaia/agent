@@ -6,7 +6,7 @@ import {
   activeTasks, appendConversationTurns, getConversationHistory, listTaskRecords,
   getTaskRecord, registerTaskSession, updateTaskProgress, finishTaskSession, cancelTask
 } from "./shared-state.js";
-import { setWhatsAppSocket, getWhatsAppSocket, setWhatsAppConnectionState } from "./whatsapp/socket-state.js";
+import { setWhatsAppSocket, getWhatsAppSocket, setWhatsAppConnectionState, setWhatsAppOwnerJid } from "./whatsapp/socket-state.js";
 
 const authDir = path.join(config.stateDir, "whatsapp-auth");
 const ownerFile = path.join(config.stateDir, "whatsapp-owner.json");
@@ -45,7 +45,7 @@ async function saveOwner(number) {
   await fs.mkdir(config.stateDir, { recursive: true, mode: 0o700 });
   const temporary = ownerFile + ".tmp";
   await fs.writeFile(temporary, JSON.stringify({ ownerJid, updatedAt: new Date().toISOString() }), { mode: 0o600 });
-  await fs.rename(temporary, ownerFile);
+  await fs.rename(temporary, ownerFile);\n  setWhatsAppOwnerJid(ownerJid);
 }
 
 async function loadBaileys() {
