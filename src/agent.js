@@ -412,7 +412,10 @@ export async function runAgent(task, options = {}) {
                     startedAt: new Date().toISOString(), abortController: new AbortController(), cancelRequested: false
                   };
                   await registerTaskSession(childSession);
-                  options.onProgress?.({ type: "subagent_task_start", taskId: childSession.id, message: "Delegated to " + specialist + ": " + assignment.task.trim().slice(0, 180) });
+                  const abortFromParent = () => childSession.abortController.abort();
+                  if (options.signal?.aborted) abortFromParent();
+                  else options.signal?.addEventListener("abort", abortFromParent, { once: true });
+                  options.onProgress?.({ type: "subagent_task_start", taskId: childSession.id, message: "Delegated task " + childSession.id + " assigned to " + specialist + ": " + assignment.task.trim().slice(0, 180) });
                   try {
                     const subagentResult = await runAgent(
                       "You are a specialist subagent working for Nabees. Complete only this assignment, use available tools as needed, do not spawn agents, do not broaden scope, and return a concise report of work performed, files changed, checks run, and remaining blockers.\\n\\nAssignment:\\n" + assignment.task.trim(),
@@ -424,9 +427,11 @@ export async function runAgent(task, options = {}) {
                     );
                     const status = subagentResult.status === "cancelled" ? "cancelled" : subagentResult.status === "failed" ? "failed" : subagentResult.status === "step_limit" ? "paused" : "completed";
                     await finishTaskSession(childSession.id, status, subagentResult.answer || "");
+                    options.signal?.removeEventListener("abort", abortFromParent);
                     return { index: index + 1, taskId: childSession.id, agent: specialist, status, answer: subagentResult.answer, checkpoint: subagentResult.checkpoint || null };
                   } catch (error) {
                     await finishTaskSession(childSession.id, "failed", error.message || "Subagent failed.");
+                    options.signal?.removeEventListener("abort", abortFromParent);
                     return { index: index + 1, taskId: childSession.id, agent: specialist, status: "failed", error: error.message || "Subagent failed." };
                   }
                 }));
