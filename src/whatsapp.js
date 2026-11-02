@@ -6,7 +6,7 @@ import {
   activeTasks, appendConversationTurns, getConversationHistory, listTaskRecords,
   getTaskRecord, registerTaskSession, updateTaskProgress, finishTaskSession, cancelTask
 } from "./shared-state.js";
-import { setWhatsAppSocket, getWhatsAppSocket, setWhatsAppConnectionState, setWhatsAppOwnerJid } from "./whatsapp/socket-state.js";
+import { setWhatsAppSocket, getWhatsAppSocket, getWhatsAppConnectionState, setWhatsAppConnectionState, setWhatsAppOwnerJid } from "./whatsapp/socket-state.js";
 
 const authDir = path.join(config.stateDir, "whatsapp-auth");
 const ownerFile = path.join(config.stateDir, "whatsapp-owner.json");
@@ -242,7 +242,8 @@ export async function pairWhatsApp(phoneNumber) {
   stopping = false;
   clearTimeout(reconnectTimer);
   const sock = await connectSocket();
-  await new Promise(resolve => setTimeout(resolve, 1200));
+  // Batman-MDX also waits before requesting the code; give Baileys time to finish its initial WebSocket handshake.
+  await new Promise(resolve => setTimeout(resolve, 3000));
   if (getWhatsAppSocket() !== sock || getWhatsAppConnectionState() === "disconnected") {
     throw new Error(lastDisconnectReason || "WhatsApp disconnected before the pairing code could be requested. Check outbound WebSocket access and try again.");
   }
