@@ -234,7 +234,7 @@ async function runWhatsAppTask(jid, task, quotedMessage = null) {
     cancelRequested: false
   };
   await registerTaskSession(session);
-  const showTaskId = chatAccess.showTaskIds === true && isRealTaskRequest(task);
+  const showTaskId = chatAccess.showTaskIds !== false && isRealTaskRequest(task);
   await sendText(jid, isRealTaskRequest(task) ? (showTaskId ? "I’m on it. I’ll keep you posted. Task ID: " + session.id : "I’m on it. I’ll let you know when it’s done.") : "");
   try {
     const result = await runAgent(task, {
@@ -347,7 +347,7 @@ async function handleIncomingMessage(message) {
     "Owner-defined WhatsApp rules:",
     ...(chatAccess.globalRules||[]),
     ...(settings.rules||[]),
-    "Reply naturally to this message. Do not reveal internal identifiers.",
+    "Reply naturally to this message like Nabees, not a scripted bot. Match the sender’s tone and keep ordinary conversation free of task IDs and status boilerplate. If the owner casually asks to stop or kill the current task, cancel the relevant active task without demanding an ID; if several tasks are active and the reference is ambiguous, ask which one.",
     "Message:",
     text
   ].join("\n");
