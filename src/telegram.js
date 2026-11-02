@@ -19,7 +19,6 @@ const MAX_CONCURRENT_TASKS = 4;
 let activeTask = null;
 let selectedProfile = "general";
 let stopping = false;
-let pendingWhatsAppPairing = false;
 
 const pendingFollowups = new Map();
 
@@ -686,7 +685,7 @@ Active profile: **${selectedProfile}**
 - /tasks — list running tasks and IDs
 - /view <id> — view task progress
 - /kill <id> — stop a running task
-- /pair — connect a WhatsApp account
+- /pair <number> — connect your WhatsApp account
 - /clearworkspace — clear workspace files (asks for confirmation)
 - Send a file here to analyse it
 - /status — check progress
@@ -944,16 +943,6 @@ async function handleMessage(message, taskOptions = {}) {
     await sendRich(chatId, "This agent is private and is not authorized for this account.");
     return;
   }
-  if (pendingWhatsAppPairing && !name) {
-    pendingWhatsAppPairing = false;
-    const numbers = String(text || "").match(/\d{8,15}/g) || [];
-    if (numbers.length < 2) { await sendRich(chatId, "I need both numbers. Send the linked WhatsApp account number and your control number, with country codes.", menuButtons()); return; }
-    try {
-      const paired = await pairWhatsApp(numbers[0], numbers[1]);
-      await sendRich(chatId, "**WhatsApp pairing code**\n\n" + paired.code + "\n\nOn the linked account, open WhatsApp → Linked devices → Link with phone number and enter this code. Keep this code private.", menuButtons());
-    } catch (error) { await sendRich(chatId, "WhatsApp pairing could not be started: " + error.message, menuButtons()); }
-    return;
-  }
 
   if (name === "start" || name === "help") {
     await sendRich(chatId, helpText(), menuButtons());
@@ -976,16 +965,14 @@ async function handleMessage(message, taskOptions = {}) {
     return;
   }
   if (name === "pair") {
-    if (!argument) {
-      pendingWhatsAppPairing = true;
-      await sendRich(chatId, "Sir, send two international phone numbers separated by a space:\n1. The WhatsApp number to link to Nabees (the agent account).\n2. Your personal WhatsApp number that will be authorised to control Nabees.\n\nExample: 2348012345678 2348098765432", menuButtons());
+    const number = argument.replace(/\D/g, "");
+    if (!number) {
+      await sendRich(chatId, "Use /pair <international-number>\nExample: /pair 2348012345678", menuButtons());
       return;
     }
-    const numbers = argument.match(/\d{8,15}/g) || [];
-    if (numbers.length < 2) { await sendRich(chatId, "Use /pair <linked-account-number> <your-control-number>, both with country code and digits only.", menuButtons()); return; }
     try {
-      const paired = await pairWhatsApp(numbers[0], numbers[1]);
-      await sendRich(chatId, "**WhatsApp pairing code**\n\n" + paired.code + "\n\nOn the linked account, open WhatsApp → Linked devices → Link with phone number and enter this code. Keep this code private.", menuButtons());
+      const paired = await pairWhatsApp(number);
+      await sendRich(chatId, "**WhatsApp pairing code**\n\n" + paired.code + "\n\nOn that same number, open WhatsApp → Linked devices → Link with phone number and enter this code. This number will be the only authorized WhatsApp controller. Keep the code private.", menuButtons());
     } catch (error) { await sendRich(chatId, "WhatsApp pairing could not be started: " + error.message, menuButtons()); }
     return;
   }
