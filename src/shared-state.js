@@ -63,6 +63,9 @@ export async function registerTaskSession(session) {
   const record = {
     id: session.id || randomUUID().slice(0, 8),
     task: String(session.task || ""),
+    kind: session.kind || (session.source === "subagent" ? "delegated" : "request"),
+    parentTaskId: session.parentTaskId || null,
+    agentName: session.agentName || session.profile || "general",
     profile: session.profile || "general",
     source: session.source || "unknown",
     startedAt: session.startedAt || new Date().toISOString(),
@@ -109,6 +112,10 @@ export function listTaskRecords({ includeCompleted = true } = {}) {
   return (includeCompleted ? records : records.filter(item => item.status === "running"))
     .sort((a, b) => String(b.startedAt).localeCompare(String(a.startedAt)))
     .map(item => ({ ...item, progress: [...(item.progress || [])] }));
+}
+
+export function listDelegatedTasks({ includeCompleted = false } = {}) {
+  return listTaskRecords({ includeCompleted }).filter(item => item.kind === "delegated");
 }
 
 export function getTaskRecord(id) {
