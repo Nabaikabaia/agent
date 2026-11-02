@@ -18,7 +18,8 @@ const CALLBACK_PREFIX = "na:";
 const MAX_CONCURRENT_TASKS = 4;
 let activeTask = null;
 let selectedProfile = "general";
-let stopping = false;\nlet pendingWhatsAppPairing = false;
+let stopping = false;
+let pendingWhatsAppPairing = false;
 
 const pendingFollowups = new Map();
 
