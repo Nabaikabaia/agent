@@ -1,4 +1,5 @@
-import { getWhatsAppSocket } from "./socket-state.js";
+import { getWhatsAppSocket, getWhatsAppOwnerJid } from "./socket-state.js";
+import { requestUserChoice } from "../interaction.js";
 
 export const whatsappToolDefinitions = [
   { type: "function", function: { name: "whatsapp_send_message", description: "Send a WhatsApp text message to a phone number or JID. Sending to anyone other than the configured owner requires explicit owner confirmation.", parameters: { type: "object", properties: { to: { type: "string" }, text: { type: "string", minLength: 1, maxLength: 4000 } }, required: ["to", "text"], additionalProperties: false } } },
@@ -19,6 +20,15 @@ function jid(value) {
   return digits + "@s.whatsapp.net";
 }
 
+async function confirmSensitive(action) {
+  const result = await requestUserChoice({
+    prompt: "Nabees requests your approval to perform this WhatsApp action:\n\n" + action + "\n\nThis changes WhatsApp account or group state. Proceed?",
+    choices: ["Approve action", "Cancel"],
+    timeout_seconds: 300
+  });
+  if (result.timed_out || result.selected !== "Approve action") throw new Error("WhatsApp action was not approved (" + (result.timed_out ? "approval expired" : "cancelled") + ").");
+}
+
 async function requireSocket() {
   const sock = getWhatsAppSocket();
   if (!sock) throw new Error("WhatsApp is not connected. Pair the account first.");
@@ -30,6 +40,7 @@ export async function executeWhatsAppTool(name, args = {}) {
   switch (name) {
     case "whatsapp_send_message": {
       const to = jid(args.to);
+      if (to !== getWhatsAppOwnerJid()) await confirmSensitive("Send a WhatsApp message to " + to + ": " + String(args.text || "").slice(0, 300));
       const result = await sock.sendMessage(to, { text: String(args.text || "").slice(0, 4000) });
       return { sent: true, to, message_id: result?.key?.id || null };
     }
@@ -49,11 +60,13 @@ export async function executeWhatsAppTool(name, args = {}) {
       const groupJid = jid(args.group_jid);
       const allowed = new Set(["announcement", "not_announcement", "locked", "unlocked"]);
       if (!allowed.has(args.setting)) throw new Error("Unsupported group setting.");
+      await confirmSensitive("Change group " + groupJid + " to setting " + args.setting + ".");
       await sock.groupSettingUpdate(groupJid, args.setting);
       return { updated: true, group_jid: groupJid, setting: args.setting };
     }
     case "whatsapp_block_contact": {
       const number = jid(args.number);
+      await confirmSensitive((args.action === "block" ? "Block " : "Unblock ") + number + ".");
       await sock.updateBlockStatus(number, args.action === "block" ? "block" : "unblock");
       return { updated: true, number, action: args.action };
     }
@@ -61,11 +74,13 @@ export async function executeWhatsAppTool(name, args = {}) {
       const groupJid = jid(args.group_jid);
       const number = jid(args.number);
       if (!["add", "remove", "promote", "demote"].includes(args.action)) throw new Error("Unsupported participant action.");
+      await confirmSensitive("Perform group participant action " + args.action + " for " + number + " in " + groupJid + ".");
       const result = await sock.groupParticipantsUpdate(groupJid, [number], args.action);
       return { updated: true, group_jid: groupJid, number, action: args.action, result };
     }
     case "whatsapp_group_invite_link": {
       const groupJid = jid(args.group_jid);
+      if (args.reset) await confirmSensitive("Reset the invite link for group " + groupJid + ". Existing invite links will stop working.");
       const code = args.reset ? await sock.groupRevokeInvite(groupJid) : await sock.groupInviteCode(groupJid);
       return { group_jid: groupJid, invite_link: "https://chat.whatsapp.com/" + code, reset: Boolean(args.reset) };
     }
