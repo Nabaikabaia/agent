@@ -15,6 +15,7 @@ let connectPromise = null;
 let reconnectTimer = null;
 let stopping = false;
 let ownerJid = "";
+let accountRegistered = false;
 
 function normalizeNumber(value) {
   const digits = String(value || "").replace(/\D/g, "");
@@ -58,6 +59,7 @@ async function connectSocket() {
     const lib = await loadBaileys();
     await fs.mkdir(authDir, { recursive: true, mode: 0o700 });
     const { state, saveCreds } = await lib.useMultiFileAuthState(authDir);
+    accountRegistered = Boolean(state.creds?.registered);
     const makeWASocket = lib.default;
     const sock = makeWASocket({
       auth: state,
@@ -187,7 +189,7 @@ async function handleIncomingMessage(message) {
   if (!ownerJid || !message?.key || message.key.fromMe) return;
   const remoteJid = message.key.remoteJid;
   if (!remoteJid || remoteJid.endsWith("@g.us") || remoteJid !== ownerJid) return;
-  const text = extractText(message.message || {});
+  const text = extractText(message);
   if (!text) return;
   const command = text.match(/^\/(\w+)(?:\s+([\s\S]*))?$/);
   const name = command?.[1]?.toLowerCase();
@@ -224,7 +226,7 @@ export async function pairWhatsApp(linkedAccountNumber, controllerNumber) {
   const linkedNumber = normalizeNumber(linkedAccountNumber);
   await saveOwner(controllerNumber);
   const sock = await connectSocket();
-  if (sock.authState?.creds?.registered) throw new Error("A WhatsApp account is already paired. Log it out before pairing another account.");
+  if (accountRegistered) throw new Error("A WhatsApp account is already paired. Log it out before pairing another account.");
   const code = await sock.requestPairingCode(linkedNumber);
   return { code: String(code).match(/.{1,4}/g)?.join("-") || String(code), linkedAccount: linkedNumber, controller: ownerJid };
 }
