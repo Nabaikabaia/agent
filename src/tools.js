@@ -7,6 +7,7 @@ import { requestUserChoice } from "./interaction.js";
 import { requestPackageInstallApproval } from "./approvals.js";
 import { installSkillCommand, listSkills, readSkill } from "./skills.js";
 import { whatsappToolDefinitions, executeWhatsAppTool } from "./whatsapp/tools.js";
+import { listDelegatedTasks, getTaskRecord, cancelTask } from "./shared-state.js";
 
 const MAX_OUTPUT = 30_000;
 let telegramPhotoSender = null;
@@ -84,6 +85,9 @@ const DENIED_PATTERNS = [
 
 export const toolDefinitions = [
   ...whatsappToolDefinitions,
+  { type: "function", function: { name: "list_tasks", description: "List actual delegated subagent assignments, with status, assigned specialist, parent task, start time and recent progress. These are instructions Nabees delegated to subagents, not ordinary user messages. Use this to answer how many delegated tasks are running, what each agent is doing, and assess whether progress appears blocked or unproductive.", parameters: { type: "object", properties: { include_completed: { type: "boolean" } }, additionalProperties: false } } },
+  { type: "function", function: { name: "get_task", description: "Inspect one delegated task by its exact task ID, including objective, assigned specialist, status, progress and result.", parameters: { type: "object", properties: { task_id: { type: "string", minLength: 1 } }, required: ["task_id"], additionalProperties: false } } },
+  { type: "function", function: { name: "cancel_task", description: "Cancel one running delegated subagent assignment by task ID. Use list_tasks first when the owner refers to a task by description rather than ID. Do not cancel a parent request or unrelated assignment.", parameters: { type: "object", properties: { task_id: { type: "string", minLength: 1 } }, required: ["task_id"], additionalProperties: false } } },
   { type: "function", function: { name: "list_files", description: "List files and directories under the configured workspace.", parameters: { type: "object", properties: { path: { type: "string" } }, additionalProperties: false } } },
   { type: "function", function: { name: "read_file", description: "Read a UTF-8 text file inside the configured workspace.", parameters: { type: "object", properties: { path: { type: "string" } }, required: ["path"], additionalProperties: false } } },
   { type: "function", function: { name: "write_file", description: "Create or overwrite UTF-8 text files. Files previously created by Nabees inside the workspace may be overwritten without approval. Replacing other existing files requires owner approval; any write outside the workspace always requires approval. Sensitive files and secret paths are blocked.", parameters: { type: "object", properties: { path: { type: "string" }, content: { type: "string" } }, required: ["path", "content"], additionalProperties: false } } },
@@ -539,6 +543,26 @@ async function runCheck(args) {
 export async function executeTool(name, args, options = {}) {
   if (options.signal?.aborted) throw new Error("Task cancelled.");
   switch (name) {
+    case "list_tasks": {
+      const tasks = listDelegatedTasks({ includeCompleted: Boolean(args.include_completed) });
+      return { total: tasks.length, running: tasks.filter(item => item.status === "running").length,
+        queued: tasks.filter(item => item.status === "queued").length,
+        tasks: tasks.slice(0, 30).map(({ id, task, status, agentName, profile, parentTaskId, startedAt, updatedAt, progress, answer }) => ({
+          id, task, status, agent: agentName || profile, parentTaskId, startedAt, updatedAt,
+          recentProgress: (progress || []).slice(-5), ...(answer ? { result: String(answer).slice(0, 1200) } : {})
+        })) };
+    }
+    case "get_task": {
+      const task = getTaskRecord(args.task_id);
+      if (!task || task.kind !== "delegated") return { found: false, message: "Delegated task not found." };
+      return task;
+    }
+    case "cancel_task": {
+      const task = getTaskRecord(args.task_id);
+      if (!task || task.kind !== "delegated") return { cancelled: false, message: "Delegated task not found." };
+      if (task.status !== "running" || !cancelTask(args.task_id)) return { cancelled: false, status: task.status, message: "That task is no longer running." };
+      return { cancelled: true, task_id: args.task_id, task: task.task };
+    }
     case "list_files": return await listFiles(args);
     case "read_file": return await readFile(args);
     case "write_file": return await writeFile(args);
