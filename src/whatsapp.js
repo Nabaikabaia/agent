@@ -250,6 +250,22 @@ async function handleIncomingMessage(message) {
   const match=text.match(/^\/(agent|mode|help|start|status|tasks|view|taskstatus|kill|killtask|task)(?:\s+([\s\S]*))?$/i);
   const cmd=match?.[1]?.toLowerCase(), arg=match?.[2]?.trim()||"";
 
+  if(isOwner) {
+    const requestedRule=ownerRuleRequest(text);
+    if(requestedRule) {
+      if(jid===ownerJid) chatAccess.globalRules=[...(chatAccess.globalRules||[]),requestedRule].slice(-30);
+      else {
+        chatAccess.chats[jid]={...chatSettings(jid),rules:[...(chatSettings(jid).rules||[]),requestedRule].slice(-20)};
+      }
+      await saveChatAccess();
+      return sendText(jid,"Saved. I'll apply that WhatsApp rule "+(jid===ownerJid?"across your WhatsApp chats.":"in this chat."));
+    }
+    if(/^\/rules$/i.test(text)) {
+      const rules=[...(chatAccess.globalRules||[]),...(chatSettings(jid).rules||[])];
+      return sendText(jid,rules.length?"Current WhatsApp rules:\n"+rules.map((rule,i)=>(i+1)+". "+rule).join("\n"):"No custom WhatsApp rules saved yet. Say: Nabees, remember WhatsApp rule: ...");
+    }
+  }
+
   if(isOwner && cmd==="agent") {
     if(arg.toLowerCase()==="on") {
       chatAccess.chats[jid]={...chatSettings(jid),enabled:true}; await saveChatAccess();
@@ -283,15 +299,7 @@ async function handleIncomingMessage(message) {
   if(!text) return;
   // The owner's one-to-one chat is the natural control room: no wake word or
   // activation command is needed there.
-  if(ownerDm) {
-    const requestedRule=ownerRuleRequest(text);
-    if(requestedRule) {
-      chatAccess.globalRules=[...(chatAccess.globalRules||[]),requestedRule].slice(-30);
-      await saveChatAccess();
-      return sendText(jid,"Saved. I'll apply that WhatsApp rule from now on.");
-    }
-    if(cmd) return;
-  }
+  if(ownerDm && cmd) return;
   const settings=chatSettings(jid);
   if(!ownerDm && !settings.enabled) return;
   if(!ownerDm && settings.mode==="public" && !publicTrigger(message,text)) return;
