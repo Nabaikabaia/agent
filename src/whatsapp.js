@@ -58,7 +58,8 @@ function naturalKillIntent(text) {
   return /\b(?:kill|stop|cancel|abort|terminate)\b.{0,50}\b(?:that|this|the|my|current|running)\s+task\b|\b(?:kill|stop|cancel)\s+(?:it|that|this)\b/i.test(String(text||""));
 }
 function cancelLatestChatTask(jid) {
-  const session=[...activeTasks.values()].filter(item=>item.chatJid===jid).sort((a,b)=>String(b.startedAt).localeCompare(String(a.startedAt)))[0];
+  const session=[...activeTasks.values()].filter(item=>item.chatJid===jid && item.kind === "delegated").sort((a,b)=>String(b.startedAt).localeCompare(String(a.startedAt)))[0]
+    || [...activeTasks.values()].filter(item=>item.chatJid===jid).sort((a,b)=>String(b.startedAt).localeCompare(String(a.startedAt)))[0];
   return session ? cancelTask(session.id) : false;
 }
 function ownerRuleRequest(text) {
@@ -241,6 +242,8 @@ async function runWhatsAppTask(jid, task, quotedMessage = null) {
       profile: session.profile,
       history: session.history,
       signal: session.abortController.signal,
+      taskId: session.id,
+      chatJid: jid,
       onProgress: event => {
         if (event.message) void updateTaskProgress(session.id, event.message);
       }
