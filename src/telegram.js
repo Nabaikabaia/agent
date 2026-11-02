@@ -1065,7 +1065,8 @@ async function handleMessage(message, taskOptions = {}) {
   let progressTimer = null;
   let draftUpdateBusy = false;
   let draftAvailable = false;
-  let taskStatus = "failed";\n  let taskAnswer = "";
+  let taskStatus = "failed";
+  let taskAnswer = "";
   const updateDraft = async (eventText = "") => {
     if (eventText) {
       progressEvents.push(eventText);
