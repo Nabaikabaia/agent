@@ -6,6 +6,7 @@ import { executeBrowserTool } from "./browser.js";
 import { requestUserChoice } from "./interaction.js";
 import { requestPackageInstallApproval } from "./approvals.js";
 import { installSkillCommand, listSkills, readSkill } from "./skills.js";
+import { whatsappToolDefinitions, executeWhatsAppTool } from "./whatsapp/tools.js";
 
 const MAX_OUTPUT = 30_000;
 let telegramPhotoSender = null;
@@ -65,6 +66,7 @@ const DENIED_PATTERNS = [
 ];
 
 export const toolDefinitions = [
+  ...whatsappToolDefinitions,
   { type: "function", function: { name: "list_files", description: "List files and directories under the configured workspace.", parameters: { type: "object", properties: { path: { type: "string" } }, additionalProperties: false } } },
   { type: "function", function: { name: "read_file", description: "Read a UTF-8 text file inside the configured workspace.", parameters: { type: "object", properties: { path: { type: "string" } }, required: ["path"], additionalProperties: false } } },
   { type: "function", function: { name: "write_file", description: "Create or overwrite UTF-8 text files. Files previously created by Nabees inside the workspace may be overwritten without approval. Replacing other existing files requires owner approval; any write outside the workspace always requires approval. Sensitive files and secret paths are blocked.", parameters: { type: "object", properties: { path: { type: "string" }, content: { type: "string" } }, required: ["path", "content"], additionalProperties: false } } },
@@ -537,6 +539,15 @@ export async function executeTool(name, args, options = {}) {
     case "ask_user": return await requestUserChoice(args);
     case "send_telegram_photo": return await sendTelegramPhoto(args);
     case "send_telegram_document": return await sendTelegramDocument(args);
+    case "whatsapp_send_message":
+    case "whatsapp_list_groups":
+    case "whatsapp_group_metadata":
+    case "whatsapp_group_setting":
+    case "whatsapp_block_contact":
+    case "whatsapp_group_participant":
+    case "whatsapp_group_invite_link":
+    case "whatsapp_block_list":
+      return await executeWhatsAppTool(name, args, options);
     case "browser_diagnostics":
     case "browser_open":
     case "browser_list_tabs":
