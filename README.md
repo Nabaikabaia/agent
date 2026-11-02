@@ -6,7 +6,7 @@ Node.js autonomous agent powered by OpenRouter (configurable with an OpenAI-comp
 
 - Natural-chat Telegram control with Rich Messages/button callbacks, dynamic choice buttons, owner-only package-install approval prompts, and Markdown profiles in `agents/*.md`.
 - Optional WhatsApp control through Baileys. Pair from Telegram with `/pair`, link the agent WhatsApp account using the returned phone-number pairing code, and authorise your personal WhatsApp number as the controller.
-- Self-extending Baileys capability registry: Nabees can inspect the installed socket API, research a missing method, register a reusable capability after owner approval, and execute mutating methods only after a separate confirmation.
+- Approval-gated self-evolution: Nabees can inspect his own source, identify practical improvements, explain the reason/benefit/risk/files, request approval, test a proposed patch in an isolated Git worktree, and request a second approval before applying verified source files. Secrets, runtime state, dependency manifests and deployment configuration are excluded. The running process is not restarted automatically; a controlled restart is required to load applied code.\n- Self-extending Baileys capability registry: Nabees can inspect the installed socket API, research a missing method, register a reusable capability after owner approval, and execute mutating methods only after a separate confirmation.
 - Shared Telegram/WhatsApp conversation memory and a delegated-task registry. Only work Nabees assigns to a specialist subagent becomes a tracked task with its own ID, specialist, parent, progress, result and cancellation signal. Use `/tasks`, `/view <id>` and `/kill <id>`; natural-language questions such as “how many tasks are running?” are handled by the task manager. Parent conversations are not counted as delegated tasks.
 - Dynamic in-message choice prompts: the agent can pause a task, ask the owner a question with 2–8 context-specific buttons, and continue using the selected answer. Prompts expire after a timeout.
 - Workspace file listing, reading, and writing.
@@ -107,7 +107,7 @@ The Telegram controller stores recent conversation context and can run multiple 
 - `/help` — show commands.
 - `/task <task>` — explicit task submission.
 
-## Tool boundaries
+## Self-maintenance and upgrade approvals\n\nNabees can inspect his tracked source with `inspect_self`. For source changes, `self_upgrade` asks for approval before creating an isolated worktree, runs `npm run check` and `npm test` against the proposed files, then asks separately before applying them to the source checkout. A rejected or expired approval leaves live source untouched. The proposed files are restricted to source, agent profiles, documentation and tests; dependency manifests, lockfiles, secrets, credentials, runtime state and deployment settings are excluded. The running Node process continues on its already-loaded code after files are applied; restart it through the normal supervisor only after the upgrade is reviewed. Self-upgrades require the Telegram owner approval prompt to be connected.\n\n## Tool boundaries
 
 - Package installation is project-local; global installs are unsupported. Each package installation request requires explicit owner approval in Telegram. Rejecting, timing out, or restarting while awaiting a decision does not install the package.
 - Commands run without a shell, have a supported executable list, timeouts, and output limits. Pipes and redirections are unsupported.
