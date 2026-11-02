@@ -71,7 +71,7 @@ On WhatsApp, use `/tasks`, `/view <id>`, `/kill <id>`, `/status`, or `/task <req
 
 ## Setup
 
-Requires Node.js 20+ and a running Box/workspace.
+Requires Node.js 22+ and a running Box/workspace.
 
 1. Copy `.env.example` to `.env`.
 2. Create an API key at [OpenRouter](https://openrouter.ai/keys) and set `OPENROUTER_API_KEY` in `.env`. The default model is `nvidia/nemotron-3-ultra-550b-a55b:free`; free model availability and quotas can change. You can set `OPENROUTER_MODEL` to another model from the OpenRouter catalog. Slow models can use `AI_REQUEST_TIMEOUT_MS=300000` (5 minutes; maximum 600000 ms).
