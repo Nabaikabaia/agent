@@ -13,3 +13,7 @@ export function setWhatsAppConnectionState(value) {
 export function getWhatsAppConnectionState() {
   return connectionState;
 }
+
+let ownerJid = "";
+export function setWhatsAppOwnerJid(value) { ownerJid = String(value || ""); }
+export function getWhatsAppOwnerJid() { return ownerJid; }
