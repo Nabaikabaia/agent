@@ -219,8 +219,9 @@ async function sendText(jid, text, quotedMessage = null) {
 }
 
 async function runWhatsAppTask(jid, task, quotedMessage = null) {
-  if (activeTasks.size >= 4) {
-    await sendText(jid, "Nabees is already running four tasks. Use /tasks to inspect them or wait for one to finish.");
+  const activeRequests = [...activeTasks.values()].filter(item => item.kind !== "delegated").length;
+  if (activeRequests >= 4) {
+    await sendText(jid, "I’m already handling four direct requests. Delegated assignments can continue independently; wait for one request to finish before sending another.");
     return;
   }
   const session = {
