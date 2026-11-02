@@ -3,7 +3,7 @@ import path from "node:path";
 import { config } from "./config.js";
 import { runAgent } from "./agent.js";
 import {
-  activeTasks, appendConversationTurns, getConversationHistory, listTaskRecords,
+  activeTasks, appendConversationTurns, getConversationHistory, listDelegatedTasks,
   getTaskRecord, registerTaskSession, updateTaskProgress, finishTaskSession, cancelTask
 } from "./shared-state.js";
 import { setWhatsAppSocket, getWhatsAppSocket, getWhatsAppConnectionState, setWhatsAppConnectionState, setWhatsAppOwnerJid } from "./whatsapp/socket-state.js";
@@ -235,8 +235,7 @@ async function runWhatsAppTask(jid, task, quotedMessage = null) {
     cancelRequested: false
   };
   await registerTaskSession(session);
-  const showTaskId = chatAccess.showTaskIds !== false && isRealTaskRequest(task);
-  await sendText(jid, isRealTaskRequest(task) ? (showTaskId ? "I’m on it. I’ll keep you posted. Task ID: " + session.id : "I’m on it. I’ll let you know when it’s done.") : "");
+  await sendText(jid, "I’m on it. I’ll let you know what I get done.");
   try {
     const result = await runAgent(task, {
       profile: session.profile,
