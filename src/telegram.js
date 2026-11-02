@@ -1064,7 +1064,8 @@ async function handleMessage(message, taskOptions = {}) {
   const draftId = Math.max(1, Date.now() % 2147483647);
   let progressTimer = null;
   let draftUpdateBusy = false;
-  let draftAvailable = false;\n  let taskStatus = "failed";\n  let taskAnswer = "";
+  let draftAvailable = false;
+  let taskStatus = "failed";\n  let taskAnswer = "";
   const updateDraft = async (eventText = "") => {
     if (eventText) {
       progressEvents.push(eventText);
@@ -1151,7 +1152,8 @@ export async function startTelegramController() {
     throw new Error("TELEGRAM_OWNER_ID must be your numeric Telegram user ID.");
   }
 
-  await loadSharedState();\n  try { await startWhatsAppController(); } catch (error) { console.error("[Nabees WhatsApp] Startup connection unavailable:", error.message); }
+  await loadSharedState();
+  try { await startWhatsAppController(); } catch (error) { console.error("[Nabees WhatsApp] Startup connection unavailable:", error.message); }
   const me = await telegram("getMe");
   console.log(`Telegram controller connected as @${me.username || me.id}`);
   console.log(`Authorized owner ID: ${config.telegramOwnerId}`);
