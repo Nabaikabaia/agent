@@ -118,6 +118,6 @@ The Telegram controller stores recent conversation context and can run multiple 
 - Dependency installation and project scripts can execute third-party code. Inspect unfamiliar scripts and use a disposable, isolated container for untrusted code.
 - The agent must ask before deployment, remote pushes, destructive operations, credential changes, purchases, or other high-impact actions. It must not bypass CAPTCHAs or other anti-abuse/access-control protections. Tool restrictions are not a full OS sandbox.
 
-## Create profiles
+## Specialist profiles
 
-Add `agents/designer.md` with role-specific instructions, then select it using `/agent designer`. Profiles provide guidance and use the tools exposed by the runtime. Keep secrets out of profile files.
+Built-in profiles include `general`, `coder`, `researcher`, `analyst`, `writer`, `business`, `operations`, `data`, and `educator`. Nabees selects the profile that fits each delegated assignment; specialist work is not limited to software development. Add `agents/designer.md` with role-specific instructions, then select it using `/agent designer`. Profiles provide guidance and use the tools exposed by the runtime. Keep secrets out of profile files.
