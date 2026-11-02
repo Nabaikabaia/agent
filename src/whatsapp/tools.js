@@ -1,4 +1,7 @@
 import { getWhatsAppSocket, getWhatsAppOwnerJid } from "./socket-state.js";
+import fs from "node:fs/promises";
+import path from "node:path";
+import { config } from "../config.js";
 import { requestUserChoice } from "../interaction.js";
 import { discoverWhatsAppApi, listWhatsAppCapabilities, registerWhatsAppCapability, executeRegisteredWhatsAppCapability } from "./capability-registry.js";
 
@@ -8,6 +11,7 @@ export const whatsappToolDefinitions = [
   { type: "function", function: { name: "whatsapp_register_capability", description: "Register a reusable wrapper for an available public Baileys socket method after researching its exact signature. Registration requires owner approval. Provide argument guidance so the capability can be reused accurately.", parameters: { type: "object", properties: { name: { type: "string" }, method: { type: "string" }, description: { type: "string" }, arguments_description: { type: "string" }, risk: { type: "string", enum: ["read", "write", "destructive"] } }, required: ["name", "method", "description", "arguments_description", "risk"], additionalProperties: false } } },
   { type: "function", function: { name: "whatsapp_call_capability", description: "Execute an owner-approved registered Baileys capability. Supply arguments in the exact order and shape documented for that method. Mutating methods always require owner confirmation.", parameters: { type: "object", properties: { name: { type: "string" }, args: { type: "array", items: {} } }, required: ["name", "args"], additionalProperties: false } } },
   { type: "function", function: { name: "whatsapp_send_message", description: "Send a WhatsApp text message to a phone number or JID. Sending to anyone other than the configured owner requires explicit owner confirmation.", parameters: { type: "object", properties: { to: { type: "string" }, text: { type: "string", minLength: 1, maxLength: 4000 } }, required: ["to", "text"], additionalProperties: false } } },
+  { type: "function", function: { name: "whatsapp_send_media", description: "Send an existing image or video file from the workspace to a WhatsApp chat as native media. Use when the owner asks to receive the actual media. Sending outside the owner's private chat requires explicit approval.", parameters: { type: "object", properties: { to: { type: "string" }, path: { type: "string" }, caption: { type: "string", maxLength: 900 }, type: { type: "string", enum: ["image", "video"] } }, required: ["to", "path", "type"], additionalProperties: false } } },
   { type: "function", function: { name: "whatsapp_list_groups", description: "List WhatsApp groups available to the linked account.", parameters: { type: "object", properties: {}, additionalProperties: false } } },
   { type: "function", function: { name: "whatsapp_group_metadata", description: "Get metadata and participants for a WhatsApp group by group JID.", parameters: { type: "object", properties: { group_jid: { type: "string" } }, required: ["group_jid"], additionalProperties: false } } },
   { type: "function", function: { name: "whatsapp_group_setting", description: "Change a WhatsApp group's messaging or settings permissions. Values: announcement (admins only can message), not_announcement (all members can message), locked (only admins can edit group settings), unlocked (all members can edit settings). Confirm the exact group and requested setting before executing.", parameters: { type: "object", properties: { group_jid: { type: "string" }, setting: { type: "string", enum: ["announcement", "not_announcement", "locked", "unlocked"] } }, required: ["group_jid", "setting"], additionalProperties: false } } },
@@ -47,6 +51,27 @@ export async function executeWhatsAppTool(name, args = {}) {
     case "whatsapp_list_capabilities": return await listWhatsAppCapabilities();
     case "whatsapp_register_capability": return await registerWhatsAppCapability(args);
     case "whatsapp_call_capability": return await executeRegisteredWhatsAppCapability(args);
+
+    case "whatsapp_send_media": {
+      const to=jid(args.to);
+      if(to!==getWhatsAppOwnerJid()) await confirmSensitive("Send a "+args.type+" file to WhatsApp chat "+to+".");
+      const workspace=await fs.realpath(config.workspace);
+      const candidate=path.resolve(workspace,String(args.path||""));
+      if(candidate!==workspace && !candidate.startsWith(workspace+path.sep)) throw new Error("Media path must stay inside the configured workspace.");
+      const file=await fs.realpath(candidate);
+      if(file!==workspace && !file.startsWith(workspace+path.sep)) throw new Error("Media file resolves outside the workspace.");
+      const stat=await fs.stat(file);
+      if(!stat.isFile()) throw new Error("Media path is not a regular file.");
+      const ext=path.extname(file).toLowerCase();
+      const imageMime=({".png":"image/png",".jpg":"image/jpeg",".jpeg":"image/jpeg",".webp":"image/webp"})[ext];
+      const videoMime=({".mp4":"video/mp4",".mov":"video/quicktime",".3gp":"video/3gpp",".mkv":"video/x-matroska"})[ext];
+      if(args.type==="image" && (!imageMime || stat.size>16*1024*1024)) throw new Error("Image must be PNG, JPEG or WEBP and no larger than 16 MB.");
+      if(args.type==="video" && (!videoMime || stat.size>64*1024*1024)) throw new Error("Video must be MP4, MOV, 3GP or MKV and no larger than 64 MB.");
+      const bytes=await fs.readFile(file);
+      const payload=args.type==="image"?{image:bytes,mimetype:imageMime,caption:String(args.caption||"").slice(0,900)}:{video:bytes,mimetype:videoMime,caption:String(args.caption||"").slice(0,900)};
+      const result=await sock.sendMessage(to,payload);
+      return {sent:true,to,type:args.type,message_id:result?.key?.id||null};
+    }
     case "whatsapp_send_message": {
       const to = jid(args.to);
       if (to !== getWhatsAppOwnerJid()) await confirmSensitive("Send a WhatsApp message to " + to + ": " + String(args.text || "").slice(0, 300));
