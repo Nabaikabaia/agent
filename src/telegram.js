@@ -682,7 +682,7 @@ Active profile: **${selectedProfile}**
 - /agent <name> — switch agent profile
 - /agents — list profiles
 - /task <task> — start a task
-- /tasks — list delegated subagent tasks and IDs
+- /tasks — list delegated subagent assignments and their IDs
 - /view <id> — view task progress
 - /kill <id> — stop a running task
 - /pair <number> — connect your WhatsApp account
