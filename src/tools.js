@@ -539,6 +539,10 @@ export async function executeTool(name, args, options = {}) {
     case "ask_user": return await requestUserChoice(args);
     case "send_telegram_photo": return await sendTelegramPhoto(args);
     case "send_telegram_document": return await sendTelegramDocument(args);
+    case "whatsapp_discover_api":
+    case "whatsapp_list_capabilities":
+    case "whatsapp_register_capability":
+    case "whatsapp_call_capability":
     case "whatsapp_send_message":
     case "whatsapp_list_groups":
     case "whatsapp_group_metadata":
