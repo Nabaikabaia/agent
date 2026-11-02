@@ -49,6 +49,18 @@ function taskIdPreference(text) {
   if (/\b(?:please\s+)?(?:include|send|show|display)\s+(?:the\s+)?task\s*ids?\b/i.test(text)) return true;
   return null;
 }
+function isRealTaskRequest(text) {
+  const value=String(text||"").trim();
+  if(value.length<18) return false;
+  return /\b(?:build|create|make|implement|code|write|edit|fix|debug|research|investigate|analyse|analyze|download|upload|install|deploy|update|modify|generate|convert|summari[sz]e|find|search|compare|check|test|run|scrape|extract|design|integrate|configure|set up|automate|book|send|fetch|open|inspect|review|learn|adapt|add|remove|delete|push|commit|develop|prepare|produce)\b/i.test(value);
+}
+function naturalKillIntent(text) {
+  return /\b(?:kill|stop|cancel|abort|terminate)\b.{0,50}\b(?:that|this|the|my|current|running)\s+task\b|\b(?:kill|stop|cancel)\s+(?:it|that|this)\b/i.test(String(text||""));
+}
+function cancelLatestChatTask(jid) {
+  const session=[...activeTasks.values()].filter(item=>item.chatJid===jid).sort((a,b)=>String(b.startedAt).localeCompare(String(a.startedAt)))[0];
+  return session ? cancelTask(session.id) : false;
+}
 function ownerRuleRequest(text) {
   return text.match(/^(?:hey\s+)?nabees[, ]+(?:remember|save|set)\s+(?:this\s+)?(?:whatsapp\s+)?rule\s*:\s*([\s\S]{5,1000})$/i)?.[1]?.trim() || "";
 }
@@ -215,14 +227,15 @@ async function runWhatsAppTask(jid, task, quotedMessage = null) {
     task,
     profile: "general",
     source: "whatsapp",
+    chatJid: jid,
     startedAt: new Date().toISOString(),
     history: jid===ownerJid ? getConversationHistory(30) : [],
     abortController: new AbortController(),
     cancelRequested: false
   };
   await registerTaskSession(session);
-  const showTaskIds = chatAccess.showTaskIds !== false;
-  await sendText(jid, showTaskIds ? "Nabees is on it. Task ID: " + session.id + "\nUse /view " + session.id + " to follow progress." : "Nabees is on it. I’ll send you the result when it’s ready.", quotedMessage);
+  const showTaskId = chatAccess.showTaskIds === true && isRealTaskRequest(task);
+  await sendText(jid, isRealTaskRequest(task) ? (showTaskId ? "I’m on it. I’ll keep you posted. Task ID: " + session.id : "I’m on it. I’ll let you know when it’s done.") : "");
   try {
     const result = await runAgent(task, {
       profile: session.profile,
@@ -237,7 +250,7 @@ async function runWhatsAppTask(jid, task, quotedMessage = null) {
       result.status === "failed" ? "failed" :
       result.status === "step_limit" ? "paused" : "completed";
     await finishTaskSession(session.id, status, result.answer || "");
-    await sendText(jid, (result.answer || "Task finished without a response.") + (showTaskIds ? "\n\nTask ID: " + session.id : ""), quotedMessage);
+    await sendText(jid, (result.answer || "Task finished without a response.") + (showTaskId ? "\n\nTask ID: " + session.id : ""), quotedMessage);
   } catch (error) {
     await finishTaskSession(session.id, "failed", "Task failed.");
     console.error("[Nabees WhatsApp] Agent task failed:", error.message);
@@ -256,11 +269,15 @@ async function handleIncomingMessage(message) {
   const match=text.match(/^\/(agent|mode|help|start|status|tasks|view|taskstatus|kill|killtask|task)(?:\s+([\s\S]*))?$/i);
   const cmd=match?.[1]?.toLowerCase(), arg=match?.[2]?.trim()||"";
 
+  if(isOwner && ownerDm && naturalKillIntent(text)) {
+    const stopped=cancelLatestChatTask(jid);
+    if(stopped) return sendText(jid,"Got it. I’ve stopped that task.");
+  }
   if(isOwner && ownerDm) {
     const taskIds=taskIdPreference(text);
     if(taskIds!==null) {
       chatAccess.showTaskIds=taskIds; await saveChatAccess();
-      return sendText(jid, taskIds ? "Task IDs will be included in WhatsApp task updates again." : "Understood. I’ll stop including task IDs in WhatsApp task updates.");
+      return sendText(jid, taskIds ? "I’ll show an ID when I’m handling a proper tracked task, not during ordinary chat." : "No problem. I’ll keep task IDs out of our chat.");
     }
   }
 
