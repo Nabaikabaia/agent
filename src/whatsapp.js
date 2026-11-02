@@ -17,6 +17,32 @@ let stopping = false;
 let ownerJid = "";
 let accountRegistered = false;
 let lastDisconnectReason = "";
+const chatAccessFile = path.join(config.stateDir, "whatsapp-chat-access.json");
+let chatAccess = { chats: {} };
+const outboundMessageIds = new Set();
+async function loadChatAccess() {
+  try { const saved=JSON.parse(await fs.readFile(chatAccessFile,"utf8")); if(saved?.chats && typeof saved.chats==="object") chatAccess=saved; }
+  catch(error) { if(error.code!=="ENOENT") console.error("[Nabees WhatsApp] Chat settings load failed:",error.message); }
+}
+async function saveChatAccess() {
+  await fs.mkdir(config.stateDir,{recursive:true,mode:0o700});
+  const tmp=chatAccessFile+".tmp";
+  await fs.writeFile(tmp,JSON.stringify(chatAccess,null,2),{mode:0o600});
+  await fs.rename(tmp,chatAccessFile);
+}
+function chatSettings(jid) { return chatAccess.chats[jid] || {enabled:false,mode:"public"}; }
+function ownerMessage(message) {
+  return Boolean(message?.key?.fromMe || (ownerJid && (message?.key?.participant===ownerJid || message?.key?.remoteJid===ownerJid)));
+}
+function contextInfo(message) {
+  const m=message?.message||{};
+  return m.extendedTextMessage?.contextInfo||m.imageMessage?.contextInfo||m.videoMessage?.contextInfo||
+    m.documentMessage?.contextInfo||m.audioMessage?.contextInfo||m.stickerMessage?.contextInfo||null;
+}
+function publicTrigger(message,text) {
+  return Boolean(contextInfo(message)?.stanzaId) || /(^|[^a-z0-9])nabees([^a-z0-9]|$)/i.test(text);
+}
+
 
 function normalizeNumber(value) {
   const digits = String(value || "").replace(/\D/g, "");
@@ -115,7 +141,7 @@ async function connectSocket() {
       }
     });
     sock.ev.on("messages.upsert", event => {
-      if (event.type !== "notify") return;
+      if (event.type !== "notify" && event.type !== "append") return;
       for (const message of event.messages || []) {
         void handleIncomingMessage(message).catch(error => {
           console.error("[Nabees WhatsApp] Message handling failed:", error.message);
@@ -159,16 +185,17 @@ function taskSummary(record) {
   ].join("\n");
 }
 
-async function sendText(jid, text) {
+async function sendText(jid, text, quotedMessage = null) {
   const sock = getWhatsAppSocket();
   if (!sock) throw new Error("WhatsApp is not connected.");
   const source = String(text || "");
   for (let offset = 0; offset < source.length; offset += 3500) {
-    await sock.sendMessage(jid, { text: source.slice(offset, offset + 3500) });
+    const sent=await sock.sendMessage(jid,{text:source.slice(offset,offset+3500)},quotedMessage?{quoted:quotedMessage}:undefined);
+    if(sent?.key?.id){outboundMessageIds.add(sent.key.id);if(outboundMessageIds.size>500)outboundMessageIds.delete(outboundMessageIds.values().next().value);}
   }
 }
 
-async function runWhatsAppTask(jid, task) {
+async function runWhatsAppTask(jid, task, quotedMessage = null) {
   if (activeTasks.size >= 4) {
     await sendText(jid, "Nabees is already running four tasks. Use /tasks to inspect them or wait for one to finish.");
     return;
@@ -184,7 +211,7 @@ async function runWhatsAppTask(jid, task) {
     cancelRequested: false
   };
   await registerTaskSession(session);
-  await sendText(jid, "Nabees is on it. Task ID: " + session.id + "\nUse /view " + session.id + " to follow progress.");
+  await sendText(jid, "Nabees is on it. Task ID: " + session.id + "\nUse /view " + session.id + " to follow progress.", quotedMessage);
   try {
     const result = await runAgent(task, {
       profile: session.profile,
@@ -199,7 +226,7 @@ async function runWhatsAppTask(jid, task) {
       result.status === "failed" ? "failed" :
       result.status === "step_limit" ? "paused" : "completed";
     await finishTaskSession(session.id, status, result.answer || "");
-    await sendText(jid, (result.answer || "Task finished without a response.") + "\n\nTask ID: " + session.id);
+    await sendText(jid, (result.answer || "Task finished without a response.") + "\n\nTask ID: " + session.id, quotedMessage);
   } catch (error) {
     await finishTaskSession(session.id, "failed", "Task failed.");
     console.error("[Nabees WhatsApp] Agent task failed:", error.message);
@@ -208,40 +235,54 @@ async function runWhatsAppTask(jid, task) {
 }
 
 async function handleIncomingMessage(message) {
-  if (!ownerJid || !message?.key || message.key.fromMe) return;
-  const remoteJid = message.key.remoteJid;
-  if (!remoteJid || remoteJid.endsWith("@g.us") || remoteJid !== ownerJid) return;
-  const text = extractText(message);
-  if (!text) return;
-  const command = text.match(/^\/(\w+)(?:\s+([\s\S]*))?$/);
-  const name = command?.[1]?.toLowerCase();
-  const argument = command?.[2]?.trim() || "";
-  if (name === "help" || name === "start") {
-    await sendText(remoteJid, "Nabees is connected on WhatsApp.\n\n/tasks — running and recent tasks\n/view <id> — live task progress\n/kill <id> — stop a task\n/task <request> — start a task\n/status — agent status\n\nYou can also chat naturally. Telegram and WhatsApp share memory and task sessions.");
-    return;
+  if (!ownerJid || !message?.key) return;
+  const jid=message.key.remoteJid;
+  if(!jid || jid==="status@broadcast" || jid.endsWith("@newsletter")) return;
+  const text=extractText(message);
+  const isOwner=ownerMessage(message);
+  if(message.key.fromMe && outboundMessageIds.has(message.key.id)) return;
+  const match=text.match(/^\/(agent|mode|help|start|status|tasks|view|taskstatus|kill|killtask|task)(?:\s+([\s\S]*))?$/i);
+  const cmd=match?.[1]?.toLowerCase(), arg=match?.[2]?.trim()||"";
+
+  if(isOwner && cmd==="agent") {
+    if(arg.toLowerCase()==="on") {
+      chatAccess.chats[jid]={...chatSettings(jid),enabled:true}; await saveChatAccess();
+      return sendText(jid,"Nabees is enabled in this chat. Mode: "+chatAccess.chats[jid].mode+". Use /mode public or /mode private. /agent off disables it.");
+    }
+    if(arg.toLowerCase()==="off") {
+      chatAccess.chats[jid]={...chatSettings(jid),enabled:false}; await saveChatAccess();
+      return sendText(jid,"Nabees is disabled in this chat. New messages here will not be processed.");
+    }
+    return sendText(jid,"Use /agent on or /agent off.");
   }
-  if (name === "status" || name === "tasks") {
-    const running = listTaskRecords({ includeCompleted: false });
-    await sendText(remoteJid, running.length
-      ? "**" + running.length + " task(s) running**\n\n" + running.map(item => item.id + " — " + item.task.slice(0, 180)).join("\n\n")
-      : "Nabees is idle. No tasks are currently running.");
-    return;
+  if(isOwner && cmd==="mode") {
+    const mode=arg.toLowerCase();
+    if(!["public","private"].includes(mode)) return sendText(jid,"Use /mode public or /mode private.");
+    if(!chatSettings(jid).enabled) return sendText(jid,"Enable Nabees here first with /agent on.");
+    chatAccess.chats[jid]={...chatSettings(jid),mode}; await saveChatAccess();
+    return sendText(jid,"Nabees mode for this chat is now "+mode+".");
   }
-  if (name === "view" || name === "taskstatus") {
-    if (!argument) return sendText(remoteJid, "Use /view <task-id>.");
-    return sendText(remoteJid, taskSummary(getTaskRecord(argument)));
+
+  if(isOwner && cmd && chatSettings(jid).enabled) {
+    if(cmd==="help"||cmd==="start") return sendText(jid,"Nabees is active here. /agent off; /mode public; /mode private; /tasks; /view <id>; /kill <id>; /task <request>.");
+    if(cmd==="status"||cmd==="tasks") {
+      const running=listTaskRecords({includeCompleted:false});
+      return sendText(jid,running.length?"**"+running.length+" task(s) running**\n\n"+running.map(x=>x.id+" — "+x.task.slice(0,180)).join("\n\n"):"Nabees is idle.");
+    }
+    if(cmd==="view"||cmd==="taskstatus") return sendText(jid,arg?taskSummary(getTaskRecord(arg)):"Use /view <task-id>.");
+    if(cmd==="kill"||cmd==="killtask") { if(!arg)return sendText(jid,"Use /kill <task-id>."); const ok=cancelTask(arg); return sendText(jid,ok?"Stop requested for "+arg+".":"No running task found."); }
+    if(cmd==="task") return arg?runWhatsAppTask(jid,arg):sendText(jid,"Use /task <request>.");
   }
-  if (name === "kill" || name === "killtask") {
-    if (!argument) return sendText(remoteJid, "Use /kill <task-id>.");
-    const stopped = cancelTask(argument);
-    return sendText(remoteJid, stopped ? "Stop requested for task " + argument + "." : "No running task found with ID " + argument + ".");
-  }
-  if (name === "task") {
-    if (!argument) return sendText(remoteJid, "Use /task <request>.");
-    return runWhatsAppTask(remoteJid, argument);
-  }
-  if (name) return sendText(remoteJid, "Unknown command. Send /help for commands.");
-  return runWhatsAppTask(remoteJid, text);
+
+  // The paired owner can configure chats but is never answered by the agent.
+  if(isOwner || !text) return;
+  const settings=chatSettings(jid);
+  if(!settings.enabled) return;
+  if(settings.mode==="public" && !publicTrigger(message,text)) return;
+  const sender=message.key.participant||jid;
+  if(sender===ownerJid) return;
+  const prompt=["WhatsApp "+(jid.endsWith("@g.us")?"group":"private chat"),"Sender: "+sender,"Mode: "+settings.mode,"Reply naturally to this message. Do not reveal internal identifiers.",text].join("\n");
+  return runWhatsAppTask(jid,prompt,message);
 }
 
 export async function pairWhatsApp(phoneNumber) {
@@ -278,6 +319,7 @@ export async function pairWhatsApp(phoneNumber) {
 export async function startWhatsAppController() {
   if (config.whatsappEnabled === false) return { enabled: false };
   await loadOwner();
+  await loadChatAccess();
   if (!ownerJid) {
     console.log("[Nabees WhatsApp] Not paired yet. Use /pair in Telegram to connect it.");
     return { enabled: true, paired: false };
