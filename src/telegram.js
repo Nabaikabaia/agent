@@ -8,7 +8,7 @@ import { replyWithGpt5 } from "./gpt5.js";
 import { listProfiles, loadProfile } from "./profiles.js";
 import { registerChoicePromptSender, resolveUserChoice } from "./interaction.js";
 import { initializePackageApprovals, registerPackageApprovalNotifier, decidePackageApproval } from "./approvals.js";
-import { executeTool, registerTelegramPhotoSender, registerTelegramDocumentSender } from "./tools.js";
+import { executeTool, registerTelegramPhotoSender, registerTelegramDocumentSender, registerTelegramVideoSender } from "./tools.js";
 import { activeTasks, loadSharedState, getConversationHistory, appendConversationTurns, registerTaskSession, updateTaskProgress, finishTaskSession, getTaskRecord } from "./shared-state.js";
 import { pairWhatsApp, startWhatsAppController } from "./whatsapp.js";
 
@@ -1169,6 +1169,27 @@ export async function startTelegramController() {
     }
     if (!response.ok || !data.ok) throw new Error(data.description || `Telegram sendPhoto failed (HTTP ${response.status}).`);
     return { sent: true, chat_id: config.telegramOwnerId, photo_id: data.result?.photo?.at(-1)?.file_id || null };
+  });
+
+  registerTelegramVideoSender(async ({ filePath, caption, mime }) => {
+    const bytes = await fs.readFile(filePath);
+    const form = new FormData();
+    form.append("chat_id", config.telegramOwnerId);
+    form.append("video", new Blob([bytes], { type: mime }), path.basename(filePath));
+    if (caption) form.append("caption", caption);
+    let response;
+    try {
+      response = await fetch(`${API()}/sendVideo`, { method: "POST", body: form, signal: AbortSignal.timeout(90_000) });
+    } catch (error) {
+      throw new Error(`Telegram sendVideo network request failed: ${describeError(error)}`, { cause: error });
+    }
+    const raw = await response.text();
+    let data;
+    try { data = JSON.parse(raw); } catch {
+      throw new Error(`Telegram sendVideo returned non-JSON (HTTP ${response.status}).`);
+    }
+    if (!response.ok || !data.ok) throw new Error(data.description || `Telegram sendVideo failed (HTTP ${response.status}).`);
+    return { sent: true, chat_id: config.telegramOwnerId, video_id: data.result?.video?.file_id || null };
   });
 
   registerTelegramDocumentSender(async ({ filePath, caption }) => {
