@@ -63,13 +63,16 @@ async function connectSocket() {
     await fs.mkdir(authDir, { recursive: true, mode: 0o700 });
     const { state, saveCreds } = await lib.useMultiFileAuthState(authDir);
     accountRegistered = Boolean(state.creds?.registered);
+    // Match Batman MDX's working connection sequence: negotiate the current
+    // WhatsApp Web version and let Baileys use its default browser identity.
+    const { version } = await lib.fetchLatestBaileysVersion();
     const makeWASocket = lib.default;
     const sock = makeWASocket({
       auth: state,
+      version,
       printQRInTerminal: false,
       syncFullHistory: false,
       markOnlineOnConnect: false,
-      browser: lib.Browsers?.ubuntu ? lib.Browsers.ubuntu("Nabees Agent") : undefined,
       getMessage: async () => undefined
     });
     setWhatsAppSocket(sock);
@@ -89,17 +92,25 @@ async function connectSocket() {
         connectPromise = null;
         const disconnectError = update.lastDisconnect?.error;
         const statusCode = disconnectError?.output?.statusCode;
-        lastDisconnectReason = disconnectError?.message || (statusCode ? `WhatsApp closed the connection (status ${statusCode}).` : "WhatsApp closed the connection without a reason.");
-        console.warn("[Nabees WhatsApp] Connection closed:", lastDisconnectReason);
-        if (!stopping && statusCode !== lib.DisconnectReason?.loggedOut) {
+        const loggedOutCode = Number(lib.DisconnectReason?.loggedOut);
+        const isLoggedOut = Number.isFinite(loggedOutCode) && statusCode === loggedOutCode;
+        const diagnostic = [
+          disconnectError?.message || "No disconnect message",
+          statusCode != null ? `status=${statusCode}` : "status=unknown",
+          disconnectError?.data?.reason ? `reason=${disconnectError.data.reason}` : "",
+          disconnectError?.data?.location ? `location=${disconnectError.data.location}` : ""
+        ].filter(Boolean).join(" | ");
+        lastDisconnectReason = diagnostic;
+        console.warn("[Nabees WhatsApp] Connection closed:", diagnostic);
+        if (!stopping && !isLoggedOut) {
           clearTimeout(reconnectTimer);
           reconnectTimer = setTimeout(() => {
             connectPromise = null;
             void connectSocket().catch(error => console.error("[Nabees WhatsApp] Reconnect failed:", error.message));
           }, 3000);
           reconnectTimer.unref?.();
-        } else if (statusCode === lib.DisconnectReason?.loggedOut) {
-          console.warn("[Nabees WhatsApp] Session logged out. Run /pair again.");
+        } else if (isLoggedOut) {
+          console.warn("[Nabees WhatsApp] WhatsApp explicitly reported a logged-out session. Run /pair again.");
         }
       }
     });
@@ -250,7 +261,7 @@ export async function pairWhatsApp(phoneNumber) {
 
   let code;
   try {
-    code = await sock.requestPairingCode(linkedNumber);
+    code = await sock.requestPairingCode(linkedNumber, "NABEESAG");
   } catch (error) {
     const reason = lastDisconnectReason ? ` WhatsApp disconnect reason: ${lastDisconnectReason}` : "";
     throw new Error(`Baileys could not request a pairing code: ${error?.message || String(error)}.${reason}`);
