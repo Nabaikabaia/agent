@@ -8,6 +8,7 @@ import { requestPackageInstallApproval } from "./approvals.js";
 import { installSkillCommand, listSkills, readSkill } from "./skills.js";
 import { whatsappToolDefinitions, executeWhatsAppTool } from "./whatsapp/tools.js";
 import { listDelegatedTasks, getTaskRecord, cancelTask } from "./shared-state.js";
+import { selfMaintenanceToolDefinitions, executeSelfMaintenanceTool } from "./self-maintenance.js";
 
 const MAX_OUTPUT = 30_000;
 let telegramPhotoSender = null;
@@ -85,6 +86,7 @@ const DENIED_PATTERNS = [
 
 export const toolDefinitions = [
   ...whatsappToolDefinitions,
+  ...selfMaintenanceToolDefinitions,
   { type: "function", function: { name: "list_tasks", description: "List actual delegated subagent assignments, with status, assigned specialist, parent task, start time and recent progress. These are instructions Nabees delegated to subagents, not ordinary user messages. Use this to answer how many delegated tasks are running, what each agent is doing, and assess whether progress appears blocked or unproductive.", parameters: { type: "object", properties: { include_completed: { type: "boolean" } }, additionalProperties: false } } },
   { type: "function", function: { name: "get_task", description: "Inspect one delegated task by its exact task ID, including objective, assigned specialist, status, progress and result.", parameters: { type: "object", properties: { task_id: { type: "string", minLength: 1 } }, required: ["task_id"], additionalProperties: false } } },
   { type: "function", function: { name: "cancel_task", description: "Cancel one running delegated subagent assignment by task ID. Use list_tasks first when the owner refers to a task by description rather than ID. Do not cancel a parent request or unrelated assignment.", parameters: { type: "object", properties: { task_id: { type: "string", minLength: 1 } }, required: ["task_id"], additionalProperties: false } } },
@@ -543,6 +545,9 @@ async function runCheck(args) {
 export async function executeTool(name, args, options = {}) {
   if (options.signal?.aborted) throw new Error("Task cancelled.");
   switch (name) {
+    case "inspect_self":
+    case "self_upgrade":
+      return await executeSelfMaintenanceTool(name, args);
     case "list_tasks": {
       const tasks = listDelegatedTasks({ includeCompleted: Boolean(args.include_completed) });
       return { total: tasks.length, running: tasks.filter(item => item.status === "running").length,
