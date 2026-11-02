@@ -9,42 +9,17 @@ import { listProfiles, loadProfile } from "./profiles.js";
 import { registerChoicePromptSender, resolveUserChoice } from "./interaction.js";
 import { initializePackageApprovals, registerPackageApprovalNotifier, decidePackageApproval } from "./approvals.js";
 import { executeTool, registerTelegramPhotoSender, registerTelegramDocumentSender } from "./tools.js";
+import { activeTasks, loadSharedState, getConversationHistory, appendConversationTurns, registerTaskSession, updateTaskProgress, finishTaskSession, getTaskRecord } from "./shared-state.js";
+import { pairWhatsApp, startWhatsAppController } from "./whatsapp.js";
 
 const API = () => `https://api.telegram.org/bot${config.telegramBotToken}`;
 const MAX_MESSAGE_LENGTH = 3900;
 const CALLBACK_PREFIX = "na:";
 const MAX_CONCURRENT_TASKS = 4;
 let activeTask = null;
-const activeTasks = new Map();
 let selectedProfile = "general";
-let conversationHistory = [];
-const conversationMemoryPath = path.join(config.stateDir, "conversation-history.json");
-let stopping = false;
+let stopping = false;\nlet pendingWhatsAppPairing = false;
 
-async function loadConversationHistory() {
-  await fs.mkdir(config.stateDir, { recursive: true });
-  try {
-    const parsed = JSON.parse(await fs.readFile(conversationMemoryPath, "utf8"));
-    if (!Array.isArray(parsed)) return [];
-    return parsed
-      .filter((item) => item && ["user", "assistant"].includes(item.role) && typeof item.content === "string")
-      .slice(-40);
-  } catch (error) {
-    if (error.code === "ENOENT") return [];
-    console.error("Could not load shared conversation memory:", error.message);
-    return [];
-  }
-}
-
-async function saveConversationHistory() {
-  await fs.mkdir(config.stateDir, { recursive: true });
-  const safeHistory = conversationHistory
-    .filter((item) => item && ["user", "assistant"].includes(item.role) && typeof item.content === "string")
-    .slice(-40);
-  const temporary = conversationMemoryPath + "." + randomUUID() + ".tmp";
-  await fs.writeFile(temporary, JSON.stringify(safeHistory, null, 2), { mode: 0o600 });
-  await fs.rename(temporary, conversationMemoryPath);
-}
 const pendingFollowups = new Map();
 
 function describeError(error) {
@@ -1044,7 +1019,7 @@ async function handleMessage(message, taskOptions = {}) {
     task,
     profile: selectedProfile,
     startedAt: new Date().toISOString(),
-    history: conversationHistory.slice(-20),
+    history: getConversationHistory(20),
     abortController: new AbortController(),
     cancelRequested: false
   };
@@ -1054,7 +1029,7 @@ async function handleMessage(message, taskOptions = {}) {
   const draftId = Math.max(1, Date.now() % 2147483647);
   let progressTimer = null;
   let draftUpdateBusy = false;
-  let draftAvailable = false;
+  let draftAvailable = false;\n  let taskStatus = "failed";\n  let taskAnswer = "";
   const updateDraft = async (eventText = "") => {
     if (eventText) {
       progressEvents.push(eventText);
@@ -1137,7 +1112,7 @@ export async function startTelegramController() {
     throw new Error("TELEGRAM_OWNER_ID must be your numeric Telegram user ID.");
   }
 
-  conversationHistory = await loadConversationHistory();
+  await loadSharedState();\n  try { await startWhatsAppController(); } catch (error) { console.error("[Nabees WhatsApp] Startup connection unavailable:", error.message); }
   const me = await telegram("getMe");
   console.log(`Telegram controller connected as @${me.username || me.id}`);
   console.log(`Authorized owner ID: ${config.telegramOwnerId}`);
