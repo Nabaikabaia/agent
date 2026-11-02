@@ -43,6 +43,10 @@ async function requireSocket() {
 export async function executeWhatsAppTool(name, args = {}) {
   const sock = await requireSocket();
   switch (name) {
+    case "whatsapp_discover_api": return await discoverWhatsAppApi();
+    case "whatsapp_list_capabilities": return await listWhatsAppCapabilities();
+    case "whatsapp_register_capability": return await registerWhatsAppCapability(args);
+    case "whatsapp_call_capability": return await executeRegisteredWhatsAppCapability(args);
     case "whatsapp_send_message": {
       const to = jid(args.to);
       if (to !== getWhatsAppOwnerJid()) await confirmSensitive("Send a WhatsApp message to " + to + ": " + String(args.text || "").slice(0, 300));
