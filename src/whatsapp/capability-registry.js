@@ -10,7 +10,7 @@ const deniedMethods = new Set([
   "end", "logout", "requestPairingCode", "sendNode", "query", "waitForSocketOpen",
   "ws", "ev", "authState", "signalRepository", "user", "generateMessageTag"
 ]);
-const readOnlyPrefixes = /^(?:fetch|get|onWhatsApp|groupMetadata|groupFetch|profilePictureUrl|newsletterMetadata|newsletterFetch|chatModify)$/i;
+const readOnlyPrefixes = /^(?:fetch|get|onWhatsApp|groupMetadata|groupFetch|profilePictureUrl|newsletterMetadata|newsletterFetch)$/i;
 
 function validMethod(method) {
   return typeof method === "string" &&
