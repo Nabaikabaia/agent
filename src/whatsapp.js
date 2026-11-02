@@ -37,6 +37,7 @@ async function loadOwner() {
   if (!ownerJid && config.whatsappOwnerJid) {
     try { ownerJid = toJid(config.whatsappOwnerJid); } catch {}
   }
+  setWhatsAppOwnerJid(ownerJid);
   return ownerJid;
 }
 
@@ -45,7 +46,8 @@ async function saveOwner(number) {
   await fs.mkdir(config.stateDir, { recursive: true, mode: 0o700 });
   const temporary = ownerFile + ".tmp";
   await fs.writeFile(temporary, JSON.stringify({ ownerJid, updatedAt: new Date().toISOString() }), { mode: 0o600 });
-  await fs.rename(temporary, ownerFile);\n  setWhatsAppOwnerJid(ownerJid);
+  await fs.rename(temporary, ownerFile);
+  setWhatsAppOwnerJid(ownerJid);
 }
 
 async function loadBaileys() {
@@ -71,7 +73,7 @@ async function connectSocket() {
     });
     setWhatsAppSocket(sock);
     setWhatsAppConnectionState("connecting");
-    sock.ev.on("creds.update", saveCreds);
+    sock.ev.on("creds.update", async () => {\n      accountRegistered = Boolean(state.creds?.registered);\n      await saveCreds();\n    });
     sock.ev.on("connection.update", update => {
       if (update.connection === "open") {
         setWhatsAppConnectionState("connected");
@@ -79,6 +81,7 @@ async function connectSocket() {
       } else if (update.connection === "close") {
         setWhatsAppConnectionState("disconnected");
         setWhatsAppSocket(null);
+        connectPromise = null;
         const statusCode = update.lastDisconnect?.error?.output?.statusCode;
         if (!stopping && statusCode !== lib.DisconnectReason?.loggedOut) {
           clearTimeout(reconnectTimer);
