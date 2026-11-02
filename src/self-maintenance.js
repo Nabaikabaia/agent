@@ -13,7 +13,9 @@ const BLOCKED = /(?:^|\/)(?:\.env(?:\..*)?|\.git|\.agent-state|node_modules|what
 
 function run(executable, args, cwd, timeoutMs = 120000) {
   return new Promise((resolve, reject) => {
-    const child = spawn(executable, args, { cwd, env: { ...process.env, CI: "1", npm_config_audit: "false", npm_config_fund: "false" }, shell: false, stdio: ["ignore", "pipe", "pipe"] });
+    const childEnv = { PATH: process.env.PATH || "", CI: "1", npm_config_audit: "false", npm_config_fund: "false" };
+    for (const key of ["HOME", "TMPDIR", "TEMP", "TMP", "SYSTEMROOT", "WINDIR", "LANG", "LC_ALL"]) if (process.env[key]) childEnv[key] = process.env[key];
+    const child = spawn(executable, args, { cwd, env: childEnv, shell: false, stdio: ["ignore", "pipe", "pipe"] });
     let stdout = "", stderr = "";
     child.stdout.on("data", chunk => { if (stdout.length < 18000) stdout += chunk.toString().slice(0, 18000 - stdout.length); });
     child.stderr.on("data", chunk => { if (stderr.length < 18000) stderr += chunk.toString().slice(0, 18000 - stderr.length); });
